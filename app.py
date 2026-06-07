@@ -13,14 +13,12 @@ st.set_page_config(
 
 require_login()
 
-# ── Hide Streamlit chrome (toolbar: Fork, GitHub, profile; menu; footer) ──────
+# ── Hide Fork / GitHub / profile icons; keep hamburger for theme switcher ─────
 st.markdown("""
 <style>
-#MainMenu                    { visibility: hidden; }
 footer                       { visibility: hidden; }
-[data-testid="stToolbar"]    { display: none !important; }
 [data-testid="stDecoration"] { display: none !important; }
-[data-testid="stHeader"]     { display: none !important; }
+[data-testid="stToolbar"]    { display: none !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -102,10 +100,10 @@ st.markdown("""
     gap: 0.5rem;
 ">
     <div style="font-size: 5rem; line-height: 1;">⚽</div>
-    <div style="font-size: 2rem; font-weight: 800; color: #1a1a1a; margin-top: 1rem;">
+    <div style="font-size: 2rem; font-weight: 800; margin-top: 1rem;">
         More to come
     </div>
-    <div style="font-size: 1rem; color: #888; max-width: 360px; margin-top: 0.25rem;">
+    <div style="font-size: 1rem; opacity: 0.5; max-width: 360px; margin-top: 0.25rem;">
         The game is on its way. Check back soon.
     </div>
 </div>
