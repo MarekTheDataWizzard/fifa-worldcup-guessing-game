@@ -1,0 +1,477 @@
+import os
+
+import bcrypt
+import psycopg2
+import streamlit as st
+
+_AUTH_CSS = """
+<style>
+/* ── Hide Streamlit chrome ───────────────────────────────── */
+#MainMenu                    { visibility: hidden; }
+footer                       { visibility: hidden; }
+[data-testid="stHeader"]     { display: none !important; }
+[data-testid="stToolbar"]    { display: none !important; }
+[data-testid="stDecoration"] { display: none !important; }
+
+/* ── White page background ───────────────────────────────── */
+[data-testid="stAppViewContainer"],
+[data-testid="stApp"] {
+    background-color: #ffffff !important;
+}
+
+/* ── Constrain & centre the auth card ───────────────────── */
+.block-container {
+    max-width: 460px !important;
+    padding-top:    0.75rem !important;
+    padding-bottom: 2rem    !important;
+    padding-left:   1.25rem !important;
+    padding-right:  1.25rem !important;
+    margin-left:  auto !important;
+    margin-right: auto !important;
+}
+
+/* ── Card around the tab panel ───────────────────────────── */
+[data-testid="stTabs"] {
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 1.25rem 1.5rem 2rem;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.10);
+    margin-top: 0.5rem;
+    border: 1px solid #e8e8e8;
+}
+
+/* ── Segmented tab bar ───────────────────────────────────── */
+[data-baseweb="tab-list"] {
+    background: #f0f2f5 !important;
+    border-radius: 10px !important;
+    padding: 4px !important;
+    gap: 4px !important;
+    border-bottom: none !important;
+    margin-bottom: 1rem !important;
+}
+[data-baseweb="tab"] {
+    border-radius: 7px !important;
+    font-weight: 600 !important;
+    font-size: 0.9rem !important;
+    color: #666 !important;
+    padding: 0.45rem 1.1rem !important;
+    flex: 1 !important;
+    justify-content: center !important;
+    transition: background 0.15s, color 0.15s !important;
+}
+[aria-selected="true"][data-baseweb="tab"] {
+    background: #ffffff !important;
+    color: #145c2c !important;
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.13) !important;
+}
+[data-baseweb="tab-highlight"] {
+    display: none !important;
+}
+[data-baseweb="tab-border"] {
+    display: none !important;
+}
+
+/* ── Field labels ────────────────────────────────────────── */
+.stTextInput label p {
+    font-weight: 600 !important;
+    font-size: 0.85rem !important;
+    color: #444 !important;
+}
+
+/* ── Text inputs — explicit light background ─────────────── */
+.stTextInput > div > div > input {
+    background-color: #ffffff !important;
+    color: #111111 !important;
+    border-radius: 8px !important;
+    border: 1.5px solid #d4d4d4 !important;
+    font-size: 0.95rem !important;
+    transition: border-color 0.15s, box-shadow 0.15s !important;
+}
+.stTextInput > div > div > input::placeholder {
+    color: #aaa !important;
+}
+.stTextInput > div > div > input:focus {
+    border-color: #145c2c !important;
+    box-shadow: 0 0 0 3px rgba(20, 92, 44, 0.15) !important;
+}
+
+/* ── Submit buttons ──────────────────────────────────────── */
+[data-testid="stFormSubmitButton"] > button {
+    background: #145c2c !important;
+    color: #ffffff !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-weight: 700 !important;
+    font-size: 0.95rem !important;
+    width: 100% !important;
+    padding: 0.6rem 1rem !important;
+    letter-spacing: 0.03em !important;
+    margin-top: 0.6rem !important;
+    transition: background 0.2s !important;
+}
+[data-testid="stFormSubmitButton"] > button:hover  { background: #0e4420 !important; }
+[data-testid="stFormSubmitButton"] > button:active { background: #0a3318 !important; }
+
+/* ── Alert messages ──────────────────────────────────────── */
+[data-testid="stAlert"] {
+    border-radius: 8px !important;
+    font-size: 0.88rem !important;
+    margin-top: 0.5rem !important;
+}
+
+/* ── Suppress anchor links on all headings ───────────────── */
+h1 a, h2 a, h3 a, h4 a, h5 a { display: none !important; }
+</style>
+"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Database helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_db_url() -> str:
+    try:
+        url = st.secrets.get("DATABASE_URL")
+        if url:
+            return url
+    except Exception:
+        pass
+    url = os.getenv("DATABASE_URL")
+    if url:
+        return url
+    st.error(
+        "DATABASE_URL is missing. "
+        "Add it to `.streamlit/secrets.toml` or your `.env` file."
+    )
+    st.stop()
+
+
+def get_connection():
+    return psycopg2.connect(_get_db_url())
+
+
+def init_auth_db():
+    """Create the users table (new schema) and migrate old schema if present."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            # New-schema table (no-op if it already exists)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id            SERIAL PRIMARY KEY,
+                    first_name    TEXT NOT NULL DEFAULT '',
+                    last_name     TEXT NOT NULL DEFAULT '',
+                    nickname      TEXT UNIQUE NOT NULL DEFAULT '',
+                    password_hash TEXT NOT NULL,
+                    is_admin      BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+            """)
+            # Idempotent migrations for tables created with old schema
+            for stmt in (
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT '';",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name  TEXT NOT NULL DEFAULT '';",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname   TEXT;",
+            ):
+                cur.execute(stmt)
+            # Copy username -> nickname for pre-migration rows
+            cur.execute("""
+                DO $$ BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'users' AND column_name = 'username'
+                    ) THEN
+                        UPDATE users SET nickname = username WHERE nickname IS NULL;
+                    END IF;
+                END $$;
+            """)
+        conn.commit()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Auth logic
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+
+def _verify_password(plain: str, hashed: str) -> bool:
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
+
+
+def _get_user_by_nickname(nickname: str) -> dict | None:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, first_name, last_name, nickname, password_hash, is_admin
+                FROM users WHERE LOWER(nickname) = LOWER(%s);
+            """, (nickname,))
+            row = cur.fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row[0],
+        "first_name": row[1],
+        "last_name": row[2],
+        "nickname": row[3],
+        "password_hash": row[4],
+        "is_admin": row[5],
+    }
+
+
+def register_user(
+    first_name: str,
+    last_name: str,
+    nickname: str,
+    password: str,
+) -> tuple[bool, str]:
+    if _get_user_by_nickname(nickname):
+        return False, "This nickname is already taken. Please choose a different one."
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO users (first_name, last_name, nickname, password_hash)
+                    VALUES (%s, %s, %s, %s);
+                """, (first_name, last_name, nickname.lower(), _hash_password(password)))
+            conn.commit()
+        return True, "Account created successfully."
+    except Exception as exc:
+        return False, f"Registration failed: {exc}"
+
+
+def login_user(nickname: str, password: str) -> bool:
+    user = _get_user_by_nickname(nickname)
+    if user is None or not _verify_password(password, user["password_hash"]):
+        return False
+    st.session_state["authenticated"] = True
+    st.session_state["user"] = {
+        "id": user["id"],
+        "first_name": user["first_name"],
+        "last_name": user["last_name"],
+        "nickname": user["nickname"],
+        "display_name": f"{user['first_name']} {user['last_name']}".strip(),
+        "is_admin": user["is_admin"],
+    }
+    return True
+
+
+def update_account(
+    current_nickname: str,
+    first_name: str,
+    last_name: str,
+    new_nickname: str,
+    current_password: str,
+    new_password: str,
+) -> tuple[bool, str]:
+    """Update profile fields and optionally the password.
+
+    Password is only changed when new_password is non-empty, in which case
+    current_password must verify against the stored hash.
+    """
+    user = _get_user_by_nickname(current_nickname)
+    if user is None:
+        return False, "User not found."
+
+    # Nickname uniqueness check (only when it actually changes)
+    if new_nickname.lower() != current_nickname.lower():
+        if _get_user_by_nickname(new_nickname):
+            return False, "That nickname is already taken. Please choose another."
+
+    # Password handling
+    new_hash = user["password_hash"]
+    if new_password:
+        if not _verify_password(current_password, user["password_hash"]):
+            return False, "Current password is incorrect."
+        if len(new_password) < 6:
+            return False, "New password must be at least 6 characters."
+        new_hash = _hash_password(new_password)
+
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE users
+                    SET first_name = %s, last_name = %s, nickname = %s, password_hash = %s
+                    WHERE LOWER(nickname) = LOWER(%s);
+                    """,
+                    (first_name, last_name, new_nickname.lower(), new_hash, current_nickname),
+                )
+            conn.commit()
+        return True, "Account updated successfully."
+    except Exception as exc:
+        return False, f"Update failed: {exc}"
+
+
+def logout_user():
+    st.session_state.pop("authenticated", None)
+    st.session_state.pop("user", None)
+    st.rerun()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Auth page UI
+# ─────────────────────────────────────────────────────────────────────────────
+
+def show_auth_page():
+    st.markdown(_AUTH_CSS, unsafe_allow_html=True)
+
+    st.markdown("""
+        <div style="text-align:center; padding:1.5rem 0 1.25rem;">
+            <div style="font-size:3.25rem; line-height:1.1;">⚽</div>
+            <div style="
+                color:#1a1a1a;
+                font-size:1.9rem;
+                font-weight:800;
+                margin:.3rem 0 0;
+                letter-spacing:-.02em;
+            ">FIFA 2026</div>
+            <div style="
+                color:#666;
+                margin:.2rem 0 0;
+                font-size:.9rem;
+            ">World Cup Guessing Game</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    tab_login, tab_register = st.tabs(["🔐  Sign In", "✍️  Create Account"])
+
+    # ── Login tab ─────────────────────────────────────────────────────────────
+    with tab_login:
+        st.markdown(
+            '<p style="font-size:1.05rem;font-weight:700;color:#222;margin:.25rem 0 .75rem;">Welcome back</p>',
+            unsafe_allow_html=True,
+        )
+
+        with st.form("login_form"):
+            nickname = st.text_input("Nickname", placeholder="your_nickname")
+            password = st.text_input("Password", type="password", placeholder="••••••••")
+            login_submitted = st.form_submit_button("Log In", width="stretch")
+
+        if login_submitted:
+            if not nickname or not password:
+                st.error("Please fill in all fields.")
+            elif login_user(nickname.strip(), password):
+                st.success(
+                    f"Welcome, **{st.session_state['user']['display_name']}**! "
+                    "Loading the game…"
+                )
+                st.rerun()
+            else:
+                st.error("Invalid nickname or password.")
+
+    # ── Register tab ──────────────────────────────────────────────────────────
+    with tab_register:
+        st.markdown(
+            '<p style="font-size:1.05rem;font-weight:700;color:#222;margin:.25rem 0 .75rem;">Create your account</p>',
+            unsafe_allow_html=True,
+        )
+
+        with st.form("register_form"):
+            col_a, col_b = st.columns(2)
+            with col_a:
+                first_name = st.text_input("First Name *", placeholder="John")
+            with col_b:
+                last_name = st.text_input("Last Name *", placeholder="Doe")
+
+            nickname_reg = st.text_input(
+                "Nickname *",
+                placeholder="johndoe",
+                help="This is what you'll use to log in. Only letters, numbers and underscores.",
+            )
+            pw1 = st.text_input("Password *", type="password", placeholder="Min. 6 characters")
+            pw2 = st.text_input("Confirm Password *", type="password", placeholder="Repeat your password")
+            reg_submitted = st.form_submit_button("Create Account", width="stretch")
+
+        if reg_submitted:
+            errors: list[str] = []
+            if not all([first_name, last_name, nickname_reg, pw1, pw2]):
+                errors.append("All fields are required.")
+            else:
+                if len(nickname_reg.strip()) < 3:
+                    errors.append("Nickname must be at least 3 characters.")
+                if len(pw1) < 6:
+                    errors.append("Password must be at least 6 characters.")
+                if pw1 != pw2:
+                    errors.append("Passwords do not match.")
+
+            if errors:
+                for err in errors:
+                    st.error(err)
+            else:
+                ok, msg = register_user(
+                    first_name.strip(),
+                    last_name.strip(),
+                    nickname_reg.strip(),
+                    pw1,
+                )
+                if ok:
+                    # Auto-login after registration for smoother UX
+                    login_user(nickname_reg.strip(), pw1)
+                    st.success(f"Account created! Welcome, **{first_name.strip()}**! Loading the game…")
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+
+_AUTOCOMPLETE_JS = """
+<script>
+(function () {
+    function applyAutocomplete() {
+        var panels = document.querySelectorAll('[data-testid="stTabPanel"]');
+        if (panels.length < 2) return false;
+
+        // Login panel — nickname=username, password=current-password
+        panels[0].querySelectorAll('[data-testid="stTextInput"]').forEach(function (wrap) {
+            var label = wrap.querySelector('label');
+            var input = wrap.querySelector('input');
+            if (!label || !input) return;
+            var t = label.textContent.toLowerCase();
+            if (t.includes('nickname')) {
+                input.setAttribute('name', 'username');
+                input.setAttribute('autocomplete', 'username');
+            } else if (t.includes('password')) {
+                input.setAttribute('name', 'password');
+                input.setAttribute('autocomplete', 'current-password');
+            }
+        });
+
+        // Register panel — username + new-password
+        panels[1].querySelectorAll('[data-testid="stTextInput"]').forEach(function (wrap) {
+            var label = wrap.querySelector('label');
+            var input = wrap.querySelector('input');
+            if (!label || !input) return;
+            var t = label.textContent.toLowerCase();
+            if (t.includes('nickname')) {
+                input.setAttribute('name', 'reg-username');
+                input.setAttribute('autocomplete', 'username');
+            } else if (t.includes('confirm')) {
+                input.setAttribute('name', 'confirm-password');
+                input.setAttribute('autocomplete', 'new-password');
+            } else if (t.includes('password')) {
+                input.setAttribute('name', 'new-password');
+                input.setAttribute('autocomplete', 'new-password');
+            }
+        });
+
+        return true;
+    }
+
+    // Retry until both panels are rendered (Streamlit renders async)
+    var attempts = 0;
+    var timer = setInterval(function () {
+        if (applyAutocomplete() || ++attempts >= 15) clearInterval(timer);
+    }, 200);
+})();
+</script>
+"""
+
+
+def require_login():
+    init_auth_db()
+    if st.session_state.get("authenticated"):
+        return
+    show_auth_page()
+    st.markdown(_AUTOCOMPLETE_JS, unsafe_allow_html=True)
+    st.stop()
