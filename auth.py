@@ -173,6 +173,25 @@ def init_auth_db():
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname   TEXT;",
             ):
                 cur.execute(stmt)
+            # Drop NOT NULL from legacy columns so new INSERTs don't fail
+            cur.execute("""
+                DO $$ BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'users' AND column_name = 'username'
+                    ) THEN
+                        ALTER TABLE users ALTER COLUMN username SET DEFAULT '';
+                        ALTER TABLE users ALTER COLUMN username DROP NOT NULL;
+                    END IF;
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'users' AND column_name = 'display_name'
+                    ) THEN
+                        ALTER TABLE users ALTER COLUMN display_name SET DEFAULT '';
+                        ALTER TABLE users ALTER COLUMN display_name DROP NOT NULL;
+                    END IF;
+                END $$;
+            """)
             # Copy username -> nickname for pre-migration rows
             cur.execute("""
                 DO $$ BEGIN
@@ -204,7 +223,7 @@ def _get_user_by_nickname(nickname: str) -> dict | None:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT id, first_name, last_name, nickname, password_hash, is_admin
-                FROM users WHERE LOWER(nickname) = LOWER(%s);
+                FROM users WHERE nickname = %s;
             """, (nickname,))
             row = cur.fetchone()
     if row is None:
@@ -233,7 +252,7 @@ def register_user(
                 cur.execute("""
                     INSERT INTO users (first_name, last_name, nickname, password_hash)
                     VALUES (%s, %s, %s, %s);
-                """, (first_name, last_name, nickname.lower(), _hash_password(password)))
+                """, (first_name, last_name, nickname, _hash_password(password)))
             conn.commit()
         return True, "Account created successfully."
     except Exception as exc:
@@ -274,7 +293,7 @@ def update_account(
         return False, "User not found."
 
     # Nickname uniqueness check (only when it actually changes)
-    if new_nickname.lower() != current_nickname.lower():
+    if new_nickname != current_nickname:
         if _get_user_by_nickname(new_nickname):
             return False, "That nickname is already taken. Please choose another."
 
@@ -296,7 +315,7 @@ def update_account(
                     SET first_name = %s, last_name = %s, nickname = %s, password_hash = %s
                     WHERE LOWER(nickname) = LOWER(%s);
                     """,
-                    (first_name, last_name, new_nickname.lower(), new_hash, current_nickname),
+                    (first_name, last_name, new_nickname, new_hash, current_nickname),
                 )
             conn.commit()
         return True, "Account updated successfully."

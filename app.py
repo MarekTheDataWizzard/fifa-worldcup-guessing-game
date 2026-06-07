@@ -72,7 +72,7 @@ with st.sidebar:
                 if ok:
                     st.session_state["user"]["first_name"] = first_name.strip()
                     st.session_state["user"]["last_name"] = last_name.strip()
-                    st.session_state["user"]["nickname"] = nickname.strip().lower()
+                    st.session_state["user"]["nickname"] = nickname.strip()
                     st.session_state["user"]["display_name"] = (
                         f"{first_name.strip()} {last_name.strip()}"
                     )
