@@ -121,6 +121,9 @@ footer                       { visibility: hidden; }
 
 /* ── Suppress anchor links on all headings ───────────────── */
 h1 a, h2 a, h3 a, h4 a, h5 a { display: none !important; }
+
+/* ── Hide "Press Enter to submit form" helper text ───────── */
+[data-testid="InputInstructions"] { display: none !important; }
 </style>
 """
 
@@ -150,8 +153,9 @@ def get_connection():
     return psycopg2.connect(_get_db_url())
 
 
+@st.cache_resource
 def init_auth_db():
-    """Create the users table (new schema) and migrate old schema if present."""
+    """Create the users table and run migrations. Cached — runs once per server start."""
     with get_connection() as conn:
         with conn.cursor() as cur:
             # New-schema table (no-op if it already exists)
@@ -371,14 +375,13 @@ def show_auth_page():
         if login_submitted:
             if not nickname or not password:
                 st.error("Please fill in all fields.")
-            elif login_user(nickname.strip(), password):
-                st.success(
-                    f"Welcome, **{st.session_state['user']['display_name']}**! "
-                    "Loading the game…"
-                )
-                st.rerun()
             else:
-                st.error("Invalid nickname or password.")
+                with st.spinner("Signing in…"):
+                    success = login_user(nickname.strip(), password)
+                if success:
+                    st.rerun()
+                else:
+                    st.error("Invalid nickname or password.")
 
     # ── Register tab ──────────────────────────────────────────────────────────
     with tab_register:
@@ -419,16 +422,16 @@ def show_auth_page():
                 for err in errors:
                     st.error(err)
             else:
-                ok, msg = register_user(
-                    first_name.strip(),
-                    last_name.strip(),
-                    nickname_reg.strip(),
-                    pw1,
-                )
+                with st.spinner("Creating account…"):
+                    ok, msg = register_user(
+                        first_name.strip(),
+                        last_name.strip(),
+                        nickname_reg.strip(),
+                        pw1,
+                    )
+                    if ok:
+                        login_user(nickname_reg.strip(), pw1)
                 if ok:
-                    # Auto-login after registration for smoother UX
-                    login_user(nickname_reg.strip(), pw1)
-                    st.success(f"Account created! Welcome, **{first_name.strip()}**! Loading the game…")
                     st.rerun()
                 else:
                     st.error(msg)
