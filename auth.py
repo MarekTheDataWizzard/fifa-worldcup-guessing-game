@@ -177,22 +177,32 @@ def init_auth_db():
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname   TEXT;",
             ):
                 cur.execute(stmt)
-            # Drop NOT NULL from legacy columns so new INSERTs don't fail
+            # Neutralise legacy columns so new INSERTs don't fail
             cur.execute("""
                 DO $$ BEGIN
                     IF EXISTS (
                         SELECT 1 FROM information_schema.columns
                         WHERE table_name = 'users' AND column_name = 'username'
                     ) THEN
-                        ALTER TABLE users ALTER COLUMN username SET DEFAULT '';
                         ALTER TABLE users ALTER COLUMN username DROP NOT NULL;
+                        ALTER TABLE users ALTER COLUMN username SET DEFAULT NULL;
+                        -- Drop the unique constraint that blocks multiple NULL/empty rows
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.table_constraints
+                            WHERE table_name = 'users'
+                              AND constraint_name = 'users_username_key'
+                        ) THEN
+                            ALTER TABLE users DROP CONSTRAINT users_username_key;
+                        END IF;
+                        -- Fix any existing empty-string values left by earlier migration
+                        UPDATE users SET username = NULL WHERE username = '';
                     END IF;
                     IF EXISTS (
                         SELECT 1 FROM information_schema.columns
                         WHERE table_name = 'users' AND column_name = 'display_name'
                     ) THEN
-                        ALTER TABLE users ALTER COLUMN display_name SET DEFAULT '';
                         ALTER TABLE users ALTER COLUMN display_name DROP NOT NULL;
+                        ALTER TABLE users ALTER COLUMN display_name SET DEFAULT NULL;
                     END IF;
                 END $$;
             """)
