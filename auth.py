@@ -1,4 +1,5 @@
 import os
+import secrets
 
 import bcrypt
 import psycopg2
@@ -217,6 +218,15 @@ def init_auth_db():
                     END IF;
                 END $$;
             """)
+            # Persistent login sessions
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_sessions (
+                    token      TEXT PRIMARY KEY,
+                    user_id    INT  NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 days'
+                );
+            """)
         conn.commit()
 
 
@@ -252,6 +262,57 @@ def _get_user_by_nickname(nickname: str) -> dict | None:
     }
 
 
+def _create_session(user_id: int) -> str:
+    token = secrets.token_hex(32)
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO user_sessions (token, user_id) VALUES (%s, %s);",
+                (token, user_id),
+            )
+        conn.commit()
+    return token
+
+
+def _delete_session(token: str) -> None:
+    if not token:
+        return
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM user_sessions WHERE token = %s;", (token,))
+        conn.commit()
+
+
+def _restore_session(token: str) -> bool:
+    """Return True and populate session_state if the token is valid and unexpired."""
+    if not token:
+        return False
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT u.id, u.first_name, u.last_name, u.nickname, u.is_admin
+                    FROM user_sessions s
+                    JOIN users u ON u.id = s.user_id
+                    WHERE s.token = %s AND s.expires_at > NOW();
+                """, (token,))
+                row = cur.fetchone()
+    except Exception:
+        return False
+    if row is None:
+        return False
+    st.session_state["authenticated"] = True
+    st.session_state["user"] = {
+        "id":           row[0],
+        "first_name":   row[1],
+        "last_name":    row[2],
+        "nickname":     row[3],
+        "display_name": f"{row[1]} {row[2]}".strip(),
+        "is_admin":     row[4],
+    }
+    return True
+
+
 def register_user(
     first_name: str,
     last_name: str,
@@ -279,13 +340,15 @@ def login_user(nickname: str, password: str) -> bool:
         return False
     st.session_state["authenticated"] = True
     st.session_state["user"] = {
-        "id": user["id"],
-        "first_name": user["first_name"],
-        "last_name": user["last_name"],
-        "nickname": user["nickname"],
+        "id":           user["id"],
+        "first_name":   user["first_name"],
+        "last_name":    user["last_name"],
+        "nickname":     user["nickname"],
         "display_name": f"{user['first_name']} {user['last_name']}".strip(),
-        "is_admin": user["is_admin"],
+        "is_admin":     user["is_admin"],
     }
+    token = _create_session(user["id"])
+    st.query_params["_sid"] = token
     return True
 
 
@@ -337,9 +400,33 @@ def update_account(
         return False, f"Update failed: {exc}"
 
 
+def get_all_users() -> list[dict]:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, first_name, last_name, nickname, is_admin, created_at
+                FROM users
+                ORDER BY created_at;
+            """)
+            rows = cur.fetchall()
+    return [
+        {
+            "id":         r[0],
+            "first_name": r[1],
+            "last_name":  r[2],
+            "nickname":   r[3],
+            "is_admin":   r[4],
+            "created_at": r[5],
+        }
+        for r in rows
+    ]
+
+
 def logout_user():
+    _delete_session(st.query_params.get("_sid", ""))
     st.session_state.pop("authenticated", None)
     st.session_state.pop("user", None)
+    st.query_params.clear()
     st.rerun()
 
 
@@ -503,6 +590,9 @@ _AUTOCOMPLETE_JS = """
 def require_login():
     init_auth_db()
     if st.session_state.get("authenticated"):
+        return
+    # Restore session from persistent token stored in the URL (?_sid=…)
+    if _restore_session(st.query_params.get("_sid", "")):
         return
     show_auth_page()
     st.markdown(_AUTOCOMPLETE_JS, unsafe_allow_html=True)

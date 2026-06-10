@@ -44,7 +44,7 @@ def create_or_update_user(
                     last_name     = EXCLUDED.last_name,
                     password_hash = EXCLUDED.password_hash,
                     is_admin      = EXCLUDED.is_admin;
-            """, (first_name, last_name, nickname.lower(), password_hash, is_admin))
+            """, (first_name, last_name, nickname, password_hash, is_admin))
         conn.commit()
 
 

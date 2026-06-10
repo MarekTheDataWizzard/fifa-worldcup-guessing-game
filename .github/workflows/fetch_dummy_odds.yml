@@ -1,15 +1,16 @@
-name: Fetch dummy odds
+name: Fetch final odds
 
 on:
   schedule:
-    - cron: "0 7 * * *"
+    # Every 30 minutes — script exits early when no match is within 90 min
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  fetch-dummy-odds:
+  fetch-final-odds:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,11 +23,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
+        run: pip install psycopg2-binary requests
 
-      - name: Insert dummy odds into database
+      - name: Fetch final odds (no-op when no match is within 90 min)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: |
-          python scripts/fetch_dummy_odds.py
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: python scripts/fetch_odds.py --mode final
