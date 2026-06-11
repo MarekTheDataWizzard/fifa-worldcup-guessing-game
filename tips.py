@@ -66,6 +66,31 @@ def cancel_tip(user_id: int, match_id: str):
         conn.commit()
 
 
+@st.cache_data(ttl=60)
+def get_all_tips_with_names() -> dict[str, dict[str, list[str]]]:
+    """Returns {match_id: {"1": [first_names], "X": [...], "2": [...]}} for all tips."""
+    result: dict = {}
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT t.match_id, t.tip, u.first_name, u.nickname
+                    FROM tips t
+                    JOIN users u ON u.id = t.user_id
+                    ORDER BY t.submitted_at;
+                """)
+                for row in cur.fetchall():
+                    mid  = str(row[0])
+                    tip  = row[1]
+                    name = row[2] or row[3]  # first_name fallback to nickname
+                    result.setdefault(mid, {"1": [], "X": [], "2": []})
+                    if tip in ("1", "X", "2"):
+                        result[mid][tip].append(name)
+    except Exception:
+        pass
+    return result
+
+
 @st.cache_data(ttl=30)
 def get_user_tips(user_id: int) -> dict:
     """Returns {match_id: {"tip": "1"/"X"/"2", "odds": float|None, "at": datetime}}"""

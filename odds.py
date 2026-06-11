@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from statistics import mean
 
 import requests
@@ -159,7 +159,11 @@ def fetch_and_store_odds(odds_type: str = "indicative") -> dict:
                 ho, dr, aw = _avg_h2h(match)
                 if ho is None:
                     continue
-                commence_time = match.get("commence_time")
+                ct_raw = match.get("commence_time")
+                commence_time = (
+                    datetime.fromisoformat(ct_raw.replace("Z", "+00:00"))
+                    if ct_raw else None
+                )
                 cur.execute("""
                     INSERT INTO match_odds
                         (home_team, away_team, odds_type,

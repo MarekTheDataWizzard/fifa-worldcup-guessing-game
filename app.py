@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 
 from admin import render_admin_page
 from auth import logout_user, require_login, update_account
+from leaderboard import render_leaderboard_page
 from matches import render_matches_page
 from odds import init_odds_db
 from tips import init_tips_db
@@ -41,18 +42,18 @@ section[data-testid="stSidebar"] .stButton > button {
     text-align: left !important;
     padding: 0.5rem 0.75rem !important;
     font-size: 0.95rem !important;
-    color: rgba(250, 250, 250, 0.72) !important;
+    color: inherit !important;
     box-shadow: none !important;
     transition: background 0.15s, color 0.15s !important;
     width: 100% !important;
 }
 section[data-testid="stSidebar"] .stButton > button:hover {
-    background: rgba(255, 255, 255, 0.09) !important;
-    color: rgba(255, 255, 255, 1) !important;
+    background: rgba(128, 128, 128, 0.15) !important;
+    color: inherit !important;
 }
 section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
-    background: rgba(255, 255, 255, 0.13) !important;
-    color: white !important;
+    background: rgba(128, 128, 128, 0.18) !important;
+    color: inherit !important;
     font-weight: 700 !important;
 }
 </style>
@@ -96,9 +97,6 @@ with st.sidebar:
 
 # ── Page functions ────────────────────────────────────────────────────────────
 
-def _render_leaderboard_page():
-    st.title("🏆 Leaderboard")
-    st.info("Coming soon — standings will appear here once matches are played.")
 
 
 def _render_rules_page():
@@ -232,7 +230,7 @@ _page = st.session_state["page"]
 if _page == "Matches":
     render_matches_page()
 elif _page == "Leaderboard":
-    _render_leaderboard_page()
+    render_leaderboard_page()
 elif _page == "Game Rules":
     _render_rules_page()
 elif _page == "Edit Account":
