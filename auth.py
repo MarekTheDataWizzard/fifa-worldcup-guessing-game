@@ -1,8 +1,10 @@
 import os
 import secrets
+from contextlib import contextmanager
 
 import bcrypt
 import psycopg2
+import psycopg2.pool
 import streamlit as st
 
 _AUTH_CSS = """
@@ -14,13 +16,10 @@ footer                       { visibility: hidden; }
 [data-testid="stToolbar"]    { display: none !important; }
 [data-testid="stDecoration"] { display: none !important; }
 
-/* ── White page background ───────────────────────────────── */
-[data-testid="stAppViewContainer"],
-[data-testid="stApp"] {
-    background-color: #ffffff !important;
-}
-
 /* ── Constrain & centre the auth card ───────────────────── */
+/* No explicit page background — inherits Streamlit's dark theme so the
+   auth→app transition is dark-to-dark and the white card doesn't cause a
+   full-page white flash on rerun. */
 .block-container {
     max-width: 460px !important;
     padding-top:    0.75rem !important;
@@ -31,14 +30,14 @@ footer                       { visibility: hidden; }
     margin-right: auto !important;
 }
 
-/* ── Card around the tab panel ───────────────────────────── */
+/* ── Card around the tab panel (white card on dark background) ─── */
 [data-testid="stTabs"] {
     background: #ffffff;
     border-radius: 16px;
     padding: 1.25rem 1.5rem 2rem;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.10);
+    box-shadow: 0 4px 32px rgba(0, 0, 0, 0.45);
     margin-top: 0.5rem;
-    border: 1px solid #e8e8e8;
+    border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 /* ── Segmented tab bar ───────────────────────────────────── */
@@ -130,7 +129,7 @@ h1 a, h2 a, h3 a, h4 a, h5 a { display: none !important; }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Database helpers
+# Database connection pool
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _get_db_url() -> str:
@@ -140,26 +139,54 @@ def _get_db_url() -> str:
             return url
     except Exception:
         pass
-    url = os.getenv("DATABASE_URL")
-    if url:
-        return url
-    st.error(
-        "DATABASE_URL is missing. "
-        "Add it to `.streamlit/secrets.toml` or your `.env` file."
-    )
-    st.stop()
+    return os.getenv("DATABASE_URL", "")
 
 
+@st.cache_resource
+def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
+    url = _get_db_url()
+    if not url:
+        raise ValueError("DATABASE_URL is not set")
+    return psycopg2.pool.ThreadedConnectionPool(1, 8, url)
+
+
+@contextmanager
 def get_connection():
-    return psycopg2.connect(_get_db_url())
+    url = _get_db_url()
+    if not url:
+        st.error(
+            "DATABASE_URL is missing. "
+            "Add it to `.streamlit/secrets.toml` or your `.env` file."
+        )
+        st.stop()
+        return
 
+    pool = _get_pool()
+    conn = pool.getconn()
+    try:
+        yield conn
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        try:
+            pool.putconn(conn)
+        except Exception:
+            pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Database helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
 @st.cache_resource
 def init_auth_db():
     """Create the users table and run migrations. Cached — runs once per server start."""
     with get_connection() as conn:
         with conn.cursor() as cur:
-            # New-schema table (no-op if it already exists)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id            SERIAL PRIMARY KEY,
@@ -171,14 +198,12 @@ def init_auth_db():
                     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
             """)
-            # Idempotent migrations for tables created with old schema
             for stmt in (
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT '';",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name  TEXT NOT NULL DEFAULT '';",
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname   TEXT;",
             ):
                 cur.execute(stmt)
-            # Neutralise legacy columns so new INSERTs don't fail
             cur.execute("""
                 DO $$ BEGIN
                     IF EXISTS (
@@ -187,7 +212,6 @@ def init_auth_db():
                     ) THEN
                         ALTER TABLE users ALTER COLUMN username DROP NOT NULL;
                         ALTER TABLE users ALTER COLUMN username SET DEFAULT NULL;
-                        -- Drop the unique constraint that blocks multiple NULL/empty rows
                         IF EXISTS (
                             SELECT 1 FROM information_schema.table_constraints
                             WHERE table_name = 'users'
@@ -195,7 +219,6 @@ def init_auth_db():
                         ) THEN
                             ALTER TABLE users DROP CONSTRAINT users_username_key;
                         END IF;
-                        -- Fix any existing empty-string values left by earlier migration
                         UPDATE users SET username = NULL WHERE username = '';
                     END IF;
                     IF EXISTS (
@@ -207,7 +230,6 @@ def init_auth_db():
                     END IF;
                 END $$;
             """)
-            # Copy username -> nickname for pre-migration rows
             cur.execute("""
                 DO $$ BEGIN
                     IF EXISTS (
@@ -218,7 +240,6 @@ def init_auth_db():
                     END IF;
                 END $$;
             """)
-            # Persistent login sessions
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS user_sessions (
                     token      TEXT PRIMARY KEY,
@@ -339,6 +360,7 @@ def login_user(nickname: str, password: str) -> bool:
     if user is None or not _verify_password(password, user["password_hash"]):
         return False
     st.session_state["authenticated"] = True
+    st.session_state["page"] = "Matches"
     st.session_state["user"] = {
         "id":           user["id"],
         "first_name":   user["first_name"],
@@ -348,6 +370,9 @@ def login_user(nickname: str, password: str) -> bool:
         "is_admin":     user["is_admin"],
     }
     token = _create_session(user["id"])
+    # Write the session token to the URL immediately, on the same run as the
+    # form submission. The subsequent st.rerun() in the login handler will
+    # then see authenticated=True and skip the auth page entirely.
     st.query_params["_sid"] = token
     return True
 
@@ -360,21 +385,14 @@ def update_account(
     current_password: str,
     new_password: str,
 ) -> tuple[bool, str]:
-    """Update profile fields and optionally the password.
-
-    Password is only changed when new_password is non-empty, in which case
-    current_password must verify against the stored hash.
-    """
     user = _get_user_by_nickname(current_nickname)
     if user is None:
         return False, "User not found."
 
-    # Nickname uniqueness check (only when it actually changes)
     if new_nickname != current_nickname:
         if _get_user_by_nickname(new_nickname):
             return False, "That nickname is already taken. Please choose another."
 
-    # Password handling
     new_hash = user["password_hash"]
     if new_password:
         if not _verify_password(current_password, user["password_hash"]):
@@ -441,14 +459,14 @@ def show_auth_page():
         <div style="text-align:center; padding:1.5rem 0 1.25rem;">
             <div style="font-size:3.25rem; line-height:1.1;">⚽</div>
             <div style="
-                color:#1a1a1a;
+                color: rgba(255,255,255,0.95);
                 font-size:1.9rem;
                 font-weight:800;
                 margin:.3rem 0 0;
                 letter-spacing:-.02em;
             ">FIFA 2026</div>
             <div style="
-                color:#666;
+                color: rgba(255,255,255,0.5);
                 margin:.2rem 0 0;
                 font-size:.9rem;
             ">World Cup Guessing Game</div>
@@ -577,7 +595,6 @@ _AUTOCOMPLETE_JS = """
         return true;
     }
 
-    // Retry until both panels are rendered (Streamlit renders async)
     var attempts = 0;
     var timer = setInterval(function () {
         if (applyAutocomplete() || ++attempts >= 15) clearInterval(timer);
@@ -591,7 +608,6 @@ def require_login():
     init_auth_db()
     if st.session_state.get("authenticated"):
         return
-    # Restore session from persistent token stored in the URL (?_sid=…)
     if _restore_session(st.query_params.get("_sid", "")):
         return
     show_auth_page()

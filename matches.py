@@ -23,6 +23,8 @@ _STADIUM_TZ: dict[str, int] = {
     "sofi": -7, "levi": -7, "lumen": -7, "bc place": -7,
 }
 
+_PAGE_SIZE = 18  # matches shown before "Show more"
+
 def _local_utc_offset(stadium_name: str) -> int:
     n = stadium_name.lower()
     for kw, off in _STADIUM_TZ.items():
@@ -52,12 +54,13 @@ _BADGE_COLORS = {
 }
 
 # CSS that stitches the three parts of a split card (top HTML / tip buttons / bottom HTML)
-# into a visually seamless unit.  Only affects stVerticalBlocks that contain a .card-top
-# element, so it is scoped to our match-card columns.
+# into a visually seamless unit, with mobile-responsive stacking and scroll perf hints.
 _TIP_CSS = """
 <style>
+/* ── Split-card gap collapse ─────────────────────────────────────────────── */
 [data-testid="stVerticalBlock"]:has(> .stElementContainer .card-top) {
     gap: 0 !important;
+    contain: layout style paint;
 }
 [data-testid="stVerticalBlock"]:has(> .stElementContainer .card-top)
     > .stElementContainer {
@@ -89,6 +92,22 @@ _TIP_CSS = """
     font-size: 0.75rem !important;
     margin: 0 !important;
     line-height: 1 !important;
+}
+
+/* ── Mobile: stack 3-column card grid to 1 column ───────────────────────── */
+@media (max-width: 640px) {
+    section.main [data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;
+    }
+    section.main [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        min-width: 100% !important;
+        flex: 1 1 100% !important;
+    }
+}
+
+/* ── Scroll performance hints ───────────────────────────────────────────── */
+section.main .block-container {
+    will-change: scroll-position;
 }
 </style>
 """
@@ -331,8 +350,15 @@ def _interactive_match_card(
     user_tip_initial: dict | None,
     user_id: int,
 ) -> None:
-    mid     = str(match["id"])
-    tip_key = f"_tip_{mid}"
+    mid       = str(match["id"])
+    tip_key   = f"_tip_{mid}"
+    toast_key = f"_toast_{mid}"
+
+    # Toast set by the previous interaction is shown here, at the start of the
+    # re-run, so it isn't discarded by st.rerun(scope="fragment") below.
+    if toast_key in st.session_state:
+        msg, icon = st.session_state.pop(toast_key)
+        st.toast(msg, icon=icon)
 
     # Session state wins over the DB-loaded initial value for instant feedback
     user_tip = st.session_state.get(tip_key, user_tip_initial)
@@ -359,9 +385,11 @@ def _interactive_match_card(
                 if is_sel:
                     cancel_tip(user_id, mid)
                     st.session_state[tip_key] = None
+                    st.session_state[toast_key] = ("Tip removed", "🗑️")
                 else:
                     submit_tip(user_id, mid, tip_val, odds_val)
                     st.session_state[tip_key] = {"tip": tip_val, "odds": odds_val}
+                    st.session_state[toast_key] = (f"Tip saved: {tip_val}", "✅")
                 st.rerun(scope="fragment")
 
     # Potential win line — updates instantly on tip change (fragment scope)
@@ -399,13 +427,20 @@ def render_matches_page():
     with st.spinner("Loading matches…"):
         matches = fetch_matches()
 
-    maybe_fetch_final_odds(matches)
+    # Throttle the final-odds check to once per 5 min in the UI;
+    # GitHub Actions is the primary driver so this is just a fallback.
+    now_utc = datetime.utcnow()
+    last_check = st.session_state.get("_last_odds_check")
+    if last_check is None or (now_utc - last_check).total_seconds() > 300:
+        maybe_fetch_final_odds(matches)
+        st.session_state["_last_odds_check"] = now_utc
+
     all_odds  = get_all_match_odds()
     user_tips = get_user_tips(user_id) if user_id and not is_admin else {}
 
     st.title("⚽ Matches")
 
-    # Inject gap-collapse CSS for split match cards (once per render, idempotent)
+    # Inject CSS once per render (idempotent via Streamlit's deduplication)
     st.markdown(_TIP_CSS, unsafe_allow_html=True)
 
     # ── Filter row 1: Phase ────────────────────────────────────────────────────
@@ -522,9 +557,24 @@ def render_matches_page():
         st.info("No matches found for the selected filters.")
         return
 
+    # ── Pagination — reset when filters change ────────────────────────────────
+    filter_key = (
+        phase_sel,
+        tuple(sorted(status_sel)),
+        quick_date,
+        str(date_range),
+        tuple(sorted(tip_sel or [])),
+    )
+    if st.session_state.get("_match_filter_key") != filter_key:
+        st.session_state["_match_filter_key"] = filter_key
+        st.session_state["_match_show_count"] = _PAGE_SIZE
+
+    show_count = st.session_state.get("_match_show_count", _PAGE_SIZE)
+    visible    = filtered[:show_count]
+
     # ── 3-column card grid ────────────────────────────────────────────────────
     cols = st.columns(3)
-    for i, match in enumerate(filtered):
+    for i, match in enumerate(visible):
         odds        = all_odds.get((match["home_name"], match["away_name"]))
         interactive = not is_admin and not match["finished"]
         user_tip    = user_tips.get(str(match["id"]))
@@ -534,5 +584,16 @@ def render_matches_page():
                 _interactive_match_card(match, odds, user_tip, user_id)
             else:
                 st.markdown(_card_html(match, odds), unsafe_allow_html=True)
+
+    # ── Show more button ──────────────────────────────────────────────────────
+    remaining = len(filtered) - show_count
+    if remaining > 0:
+        st.markdown("")
+        if st.button(
+            f"Show {min(_PAGE_SIZE, remaining)} more  ({remaining} remaining)",
+            use_container_width=True,
+        ):
+            st.session_state["_match_show_count"] = show_count + _PAGE_SIZE
+            st.rerun()
 
     st.caption("Data: github.com/rezarahiminia/worldcup2026 · refreshed every hour")
