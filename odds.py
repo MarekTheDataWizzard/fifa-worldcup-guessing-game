@@ -266,7 +266,7 @@ def maybe_fetch_final_odds(_matches: list[dict]) -> bool:
                     WHERE odds_type = 'indicative'
                       AND commence_time IS NOT NULL
                       AND commence_time - NOW() BETWEEN INTERVAL '0 minutes'
-                                                    AND INTERVAL '90 minutes'
+                                                    AND INTERVAL '240 minutes'
                       AND NOT EXISTS (
                           SELECT 1 FROM match_odds f
                           WHERE f.home_team = match_odds.home_team

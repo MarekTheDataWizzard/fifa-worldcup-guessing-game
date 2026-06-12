@@ -140,7 +140,9 @@ def fetch_matches() -> list[dict]:
         away_t = teams.get(m["away_team_id"], {})
         stad   = stadiums.get(m["stadium_id"], {})
 
-        cet_dt = dt + timedelta(hours=_CET_OFFSET - _local_utc_offset(stad.get("name_en", "")))
+        local_offset = _local_utc_offset(stad.get("name_en", ""))
+        cet_dt   = dt + timedelta(hours=_CET_OFFSET - local_offset)
+        utc_kick = dt - timedelta(hours=local_offset)
         enriched.append({
             "id":            m["id"],
             "datetime":      dt,
@@ -151,6 +153,7 @@ def fetch_matches() -> list[dict]:
             "cet_date":      cet_dt.date(),
             "cet_date_str":  cet_dt.strftime("%d/%m/%Y"),
             "cet_time_str":  cet_dt.strftime("%H:%M"),
+            "utc_kickoff":   utc_kick,
             "home_name":     home_t.get("name_en") or m.get("home_team_label", "TBD"),
             "home_flag":     _flag(home_t.get("iso2", "")),
             "home_flag_url": home_t.get("flag", ""),
@@ -164,7 +167,6 @@ def fetch_matches() -> list[dict]:
             "type":          m["type"],
             "finished":      m["finished"].upper() == "TRUE",
             "time_elapsed":  m.get("time_elapsed", "notstarted"),
-            "started":       m.get("time_elapsed", "notstarted") != "notstarted",
             "stadium":       stad.get("name_en", ""),
             "city":          stad.get("city_en", ""),
         })
@@ -211,7 +213,7 @@ def _bettors_html(bettors: dict) -> str:
     )
 
 
-def _odds_html(odds: dict | None, badge_color: str, bettors: dict | None = None) -> str:
+def _odds_html(odds: dict | None, badge_color: str) -> str:
     if not odds:
         return ""
     if odds.get("final") and odds["final"]["home"] is not None:
@@ -237,7 +239,6 @@ def _odds_html(odds: dict | None, badge_color: str, bettors: dict | None = None)
         f'</div>'
         f'</div>'
         f'<div style="text-align:center;font-size:.65rem;opacity:.38;margin-top:4px;">{label}</div>'
-        f'{_bettors_html(bettors) if bettors is not None else ""}'
         f'</div>'
     )
 
@@ -262,8 +263,9 @@ def _card_html(match: dict, odds: dict | None = None, bettors: dict | None = Non
             f'{match["cet_time_str"]}</div>'
         )
 
-    venue    = f'🏟 {match["stadium"]}' if match["stadium"] else ""
-    odds_row = _odds_html(odds, badge_color, bettors=bettors)
+    venue       = f'🏟 {match["stadium"]}' if match["stadium"] else ""
+    odds_row    = _odds_html(odds, badge_color)
+    bettors_row = _bettors_html(bettors) if bettors is not None else ""
 
     return f"""
 <div style="border:1px solid rgba(128,128,128,0.18);border-radius:14px;
@@ -292,6 +294,7 @@ def _card_html(match: dict, odds: dict | None = None, bettors: dict | None = Non
     </div>
   </div>
   {odds_row}
+  {bettors_row}
   <div style="border-top:1px solid rgba(128,128,128,0.12);padding-top:7px;
               margin-top:4px;display:flex;justify-content:space-between;
               font-size:.7rem;opacity:.45;gap:6px;">
@@ -592,15 +595,20 @@ def render_matches_page():
     visible    = filtered[:show_count]
 
     # ── Card list — sequential render guarantees correct time order everywhere ──
+    now_utc = datetime.utcnow()
     for match in visible:
         odds        = all_odds.get((match["home_name"], match["away_name"]))
+        started     = (
+            match.get("time_elapsed", "notstarted") != "notstarted"
+            or now_utc >= match["utc_kickoff"]
+        )
         interactive = not match["finished"]
         user_tip    = user_tips.get(str(match["id"]))
-        revealed    = match["started"] or match["finished"]
+        revealed    = started or match["finished"]
         bettors     = all_tips_names.get(str(match["id"])) if revealed else None
 
         if interactive:
-            clickable = not match["started"] and not is_admin
+            clickable = not started and not is_admin
             _interactive_match_card(match, odds, user_tip, user_id, clickable=clickable, bettors=bettors)
         else:
             st.markdown(_card_html(match, odds, bettors=bettors), unsafe_allow_html=True)

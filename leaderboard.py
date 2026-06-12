@@ -2,6 +2,7 @@ import streamlit as st
 
 from auth import get_all_users, get_connection
 from matches import fetch_matches
+from odds import get_all_match_odds
 
 # ─── Scoring parameters — edit here to recalculate everything ─────────────────
 _STAKE      = 100  # GX allocated per match
@@ -66,9 +67,10 @@ def _compute_scores() -> tuple[list[dict], list[str], list[str]]:
     Returns (user_scores, groups_ordered, matchdays_ordered).
     Cached 2 min; every cache miss re-fetches matches, tips, and users.
     """
-    matches  = fetch_matches()
-    all_tips = _get_all_tips()
-    users    = [u for u in get_all_users() if not u.get("is_admin")]
+    matches      = fetch_matches()
+    all_tips     = _get_all_tips()
+    users        = [u for u in get_all_users() if not u.get("is_admin")]
+    all_odds     = get_all_match_odds()
 
     finished = [
         m for m in matches
@@ -78,6 +80,18 @@ def _compute_scores() -> tuple[list[dict], list[str], list[str]]:
         _PHASE_ORDER.index(m["type"]) if m["type"] in _PHASE_ORDER else 99,
         m.get("matchday", ""),
     ))
+
+    # Build per-match odds lookup (final preferred, indicative fallback)
+    _DIR = {"1": "home", "X": "draw", "2": "away"}
+    match_rates: dict[str, dict[str, float | None]] = {}
+    for m in finished:
+        od = all_odds.get((m["home_name"], m["away_name"]))
+        if od:
+            src = od.get("final") or od.get("indicative")
+            if src:
+                match_rates[str(m["id"])] = {
+                    "1": src.get("home"), "X": src.get("draw"), "2": src.get("away")
+                }
 
     tips_idx = {(t["user_id"], t["match_id"]): t for t in all_tips}
 
@@ -109,7 +123,9 @@ def _compute_scores() -> tuple[list[dict], list[str], list[str]]:
             if tip is None:
                 gx = float(_NO_BET_PTS)
             elif tip["tip"] == outcome:
-                gx   = round(_STAKE * (tip["odds"] or 1.0), 2)
+                rates = match_rates.get(mid)
+                rate  = (rates.get(tip["tip"]) if rates else None) or tip["odds"] or 1.0
+                gx    = round(_STAKE * rate, 2)
                 bets += 1
             else:
                 gx   = float(_LOSS_PTS)
