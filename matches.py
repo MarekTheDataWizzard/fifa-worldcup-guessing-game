@@ -127,9 +127,9 @@ def _flag(iso2: str) -> str:
 
 @st.cache_data(ttl=600)
 def fetch_matches() -> list[dict]:
-    matches_raw  = requests.get(f"{_LIVE_API}/games",    timeout=10).json()["games"]
-    teams_raw    = requests.get(f"{_LIVE_API}/teams",    timeout=10).json()["teams"]
-    stadiums_raw = requests.get(f"{_LIVE_API}/stadiums", timeout=10).json()["stadiums"]
+    matches_raw  = requests.get(f"{_LIVE_API}/games",    timeout=20).json()["games"]
+    teams_raw    = requests.get(f"{_LIVE_API}/teams",    timeout=20).json()["teams"]
+    stadiums_raw = requests.get(f"{_LIVE_API}/stadiums", timeout=20).json()["stadiums"]
 
     teams    = {t["id"]: t for t in teams_raw}
     stadiums = {s["id"]: s for s in stadiums_raw}
@@ -471,7 +471,11 @@ def render_matches_page():
     user_id      = current_user.get("id")
 
     with st.spinner("Loading matches…"):
-        matches = fetch_matches()
+        try:
+            matches = fetch_matches()
+        except Exception:
+            st.error("Could not load match data — the data provider is temporarily unavailable. Please refresh in a moment.")
+            return
 
     # Throttle the final-odds check to once per 5 min in the UI;
     # GitHub Actions is the primary driver so this is just a fallback.
