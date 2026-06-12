@@ -82,7 +82,6 @@ def _compute_scores() -> tuple[list[dict], list[str], list[str]]:
     ))
 
     # Build per-match odds lookup (final preferred, indicative fallback)
-    _DIR = {"1": "home", "X": "draw", "2": "away"}
     match_rates: dict[str, dict[str, float | None]] = {}
     for m in finished:
         od = all_odds.get((m["home_name"], m["away_name"]))

@@ -26,6 +26,7 @@ _STADIUM_TZ: dict[str, int] = {
 
 _PAGE_SIZE = 18  # matches shown before "Show more"
 
+
 def _local_utc_offset(stadium_name: str) -> int:
     n = stadium_name.lower()
     for kw, off in _STADIUM_TZ.items():
@@ -244,7 +245,7 @@ def _odds_html(odds: dict | None, badge_color: str) -> str:
 
 
 def _card_html(match: dict, odds: dict | None = None, bettors: dict | None = None) -> str:
-    """Full single-block card — used for admin view and finished matches."""
+    """Full single-block card for finished matches."""
     badge_color = _BADGE_COLORS.get(match["type"], "#888")
     phase       = _phase_label(match)
     matchday    = f"Matchday {match['matchday']}" if match["matchday"] and match["type"] == "group" else ""
@@ -595,7 +596,6 @@ def render_matches_page():
     visible    = filtered[:show_count]
 
     # ── Card list — sequential render guarantees correct time order everywhere ──
-    now_utc = datetime.utcnow()
     for match in visible:
         odds        = all_odds.get((match["home_name"], match["away_name"]))
         started     = (
