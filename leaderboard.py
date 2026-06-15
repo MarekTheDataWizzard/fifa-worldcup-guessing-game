@@ -226,7 +226,11 @@ def render_leaderboard_page():
 
     current_user_id = st.session_state.get("user", {}).get("id")
 
-    user_scores, groups, matchdays = _compute_scores()
+    try:
+        user_scores, groups, matchdays = _compute_scores()
+    except Exception:
+        st.error("Could not load leaderboard — the data provider is temporarily unavailable. Please refresh in a moment.")
+        return
 
     if not user_scores or (not groups and not matchdays):
         st.info("No finished matches yet — check back after kick-off!")
