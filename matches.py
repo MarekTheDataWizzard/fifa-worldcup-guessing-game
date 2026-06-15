@@ -590,6 +590,9 @@ def render_matches_page():
         st.info("No matches found for the selected filters.")
         return
 
+    if status_sel == "Finished":
+        filtered = sorted(filtered, key=lambda m: m["datetime"], reverse=True)
+
     # ── Pagination — reset when filters change ────────────────────────────────
     filter_key = (phase_sel, status_sel, quick_date, str(date_range), tip_sel)
     if st.session_state.get("_match_filter_key") != filter_key:
