@@ -150,6 +150,7 @@ def fetch_and_store_odds(odds_type: str = "indicative") -> dict:
     remaining = resp.headers.get("x-requests-remaining", "?")
     data      = resp.json()
 
+    now_utc = datetime.now(tz=timezone.utc)
     stored = 0
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -164,6 +165,11 @@ def fetch_and_store_odds(odds_type: str = "indicative") -> dict:
                     datetime.fromisoformat(ct_raw.replace("Z", "+00:00"))
                     if ct_raw else None
                 )
+                # Final odds only for matches kicking off within 6 hours
+                if odds_type == "final" and commence_time:
+                    delta_min = (commence_time - now_utc).total_seconds() / 60
+                    if not (0 <= delta_min <= 360):
+                        continue
                 cur.execute("""
                     INSERT INTO match_odds
                         (home_team, away_team, odds_type,
@@ -266,7 +272,7 @@ def maybe_fetch_final_odds(_matches: list[dict]) -> bool:
                     WHERE odds_type = 'indicative'
                       AND commence_time IS NOT NULL
                       AND commence_time - NOW() BETWEEN INTERVAL '0 minutes'
-                                                    AND INTERVAL '240 minutes'
+                                                    AND INTERVAL '360 minutes'
                       AND NOT EXISTS (
                           SELECT 1 FROM match_odds f
                           WHERE f.home_team = match_odds.home_team

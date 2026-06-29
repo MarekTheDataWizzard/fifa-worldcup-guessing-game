@@ -113,7 +113,7 @@ def needs_final_fetch() -> bool:
                     WHERE odds_type = 'indicative'
                       AND commence_time IS NOT NULL
                       AND commence_time - NOW() BETWEEN INTERVAL '0 minutes'
-                                                    AND INTERVAL '240 minutes'
+                                                    AND INTERVAL '360 minutes'
                       AND NOT EXISTS (
                           SELECT 1 FROM match_odds f
                           WHERE f.home_team = match_odds.home_team
@@ -161,7 +161,7 @@ def fetch_and_store(odds_type: str) -> int:
                 # For final odds, only store matches kicking off within 90 min
                 if odds_type == "final" and ct:
                     delta = (ct - now_utc).total_seconds() / 60
-                    if not (0 <= delta <= 240):
+                    if not (0 <= delta <= 360):
                         continue
 
                 cur.execute("""
