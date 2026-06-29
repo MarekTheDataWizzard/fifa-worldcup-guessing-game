@@ -1,14 +1,15 @@
 import streamlit as st
 
 from auth import get_all_users, get_connection
-from matches import fetch_matches
+from matches import fetch_matches, _MULTIPLIERS
 from odds import get_all_match_odds
 
 # ─── Scoring parameters — edit here to recalculate everything ─────────────────
 _STAKE      = 100  # GX allocated per match
-_NO_BET_PTS = 70   # GX when no tip placed
+_NO_BET_PTS = 70   # GX when no tip placed (before multiplier)
 _LOSS_PTS   = 0    # GX on wrong tip
-# Correct tip earns: round(_STAKE * tip_odds, 2)
+# Correct tip earns: round(_STAKE * odds * multiplier, 2)
+# No tip earns:      round(_NO_BET_PTS * multiplier, 2)
 
 _PHASE_LABELS = {
     "r32":   "Round of 32",
@@ -118,13 +119,14 @@ def _compute_scores() -> tuple[list[dict], list[str], list[str]]:
             grp, md = _match_bucket(m)
             outcome = _outcome(m["home_score"], m["away_score"])
             tip     = tips_idx.get((uid, mid))
+            mult    = _MULTIPLIERS.get(m["type"], 1)
 
             if tip is None:
-                gx = float(_NO_BET_PTS)
+                gx = float(_NO_BET_PTS * mult)
             elif tip["tip"] == outcome:
                 rates = match_rates.get(mid)
                 rate  = (rates.get(tip["tip"]) if rates else None) or tip["odds"] or 1.0
-                gx    = round(_STAKE * rate, 2)
+                gx    = round(_STAKE * rate * mult, 2)
                 bets += 1
             else:
                 gx   = float(_LOSS_PTS)
@@ -273,10 +275,9 @@ def render_leaderboard_page():
             unsafe_allow_html=True,
         )
         st.caption(
-            f"Stake: {_STAKE} GX per match · "
-            f"No bet: {_NO_BET_PTS} GX · "
-            f"Wrong: {_LOSS_PTS} GX · "
-            f"Correct: {_STAKE} × odds GX"
+            f"Stake: {_STAKE} GX · No bet: {_NO_BET_PTS} GX · Wrong: {_LOSS_PTS} GX · "
+            f"Correct: {_STAKE} × odds GX · "
+            f"Multipliers: R16 ×2 · QF ×4 · SF ×8 · 3rd ×12 · Final ×16"
         )
 
     # ── By Group ──────────────────────────────────────────────────────────────

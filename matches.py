@@ -45,6 +45,16 @@ _PHASE_LABELS = {
 }
 _PHASE_ORDER = ["group", "r32", "r16", "qf", "sf", "third", "final"]
 
+_MULTIPLIERS = {
+    "group": 1,
+    "r32":   1,
+    "r16":   2,
+    "qf":    4,
+    "sf":    8,
+    "third": 12,
+    "final": 16,
+}
+
 _BADGE_COLORS = {
     "group": "#c17f24",
     "r32":   "#2e7d9e",
@@ -436,10 +446,12 @@ def _interactive_match_card(
 
     # Potential win — use live odds for the current tip direction, not stored tip odds
     _live_odds = {"1": h_o, "X": d_o, "2": a_o}.get(current)
+    mult        = _MULTIPLIERS.get(match["type"], 1)
+    no_bet_gx   = 70 * mult
     if not clickable:
         pw_html = ""
     elif current is not None and _live_odds is not None:
-        gx = round(100 * float(_live_odds))
+        gx = round(100 * float(_live_odds) * mult)
         pw_html = (
             f'<div style="text-align:center;padding:5px 0 4px;font-size:.8rem;">'
             f'<span style="opacity:.45;">Correct → </span>'
@@ -457,7 +469,7 @@ def _interactive_match_card(
         pw_html = (
             f'<div style="text-align:center;padding:5px 0 4px;font-size:.8rem;">'
             f'<span style="opacity:.45;">No tip · </span>'
-            f'<span style="font-weight:700;opacity:.55;">70 GX</span>'
+            f'<span style="font-weight:700;opacity:.55;">{no_bet_gx} GX</span>'
             f'</div>'
         )
 
