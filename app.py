@@ -164,6 +164,22 @@ Odds represent the market's estimate of each outcome. Higher odds = rarer outcom
 
     st.divider()
 
+    st.markdown("### Round multipliers")
+    st.markdown("""
+As the tournament progresses, the stakes get higher — every match in the knockout rounds is worth more.
+
+| Round | Multiplier | Correct tip | No tip |
+|-------|-----------|-------------|--------|
+| Group Stage / Round of 32 | ×1 | 100 × odds | 70 GX |
+| Round of 16 | ×2 | 200 × odds | 140 GX |
+| Quarter-finals | ×4 | 400 × odds | 280 GX |
+| Semi-finals | ×8 | 800 × odds | 560 GX |
+| 3rd Place | ×12 | 1 200 × odds | 840 GX |
+| Final | ×16 | 1 600 × odds | 1 120 GX |
+""")
+
+    st.divider()
+
     st.markdown("### Rules")
     st.markdown("""
 - You can **change or cancel** your tip at any time before the match kicks off.

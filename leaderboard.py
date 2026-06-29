@@ -110,6 +110,10 @@ def _compute_scores() -> tuple[list[dict], list[str], list[str]]:
         uid          = u["id"]
         display_name = f"{u['first_name']} {u['last_name']}".strip() or u["nickname"]
         total_gx     = 0.0
+        net_gx       = 0.0
+        bet_gx       = 0.0
+        no_bet_gx    = 0.0
+        stake_gx     = 0.0
         bets         = 0
         by_group:    dict[str, float] = {}
         by_matchday: dict[str, float] = {}
@@ -122,17 +126,25 @@ def _compute_scores() -> tuple[list[dict], list[str], list[str]]:
             mult    = _MULTIPLIERS.get(m["type"], 1)
 
             if tip is None:
-                gx = float(_NO_BET_PTS * mult)
+                gx         = float(_NO_BET_PTS * mult)
+                net        = 0.0
+                no_bet_gx += gx
             elif tip["tip"] == outcome:
-                rates = match_rates.get(mid)
-                rate  = (rates.get(tip["tip"]) if rates else None) or tip["odds"] or 1.0
-                gx    = round(_STAKE * rate * mult, 2)
-                bets += 1
+                rates      = match_rates.get(mid)
+                rate       = (rates.get(tip["tip"]) if rates else None) or tip["odds"] or 1.0
+                gx         = round(_STAKE * rate * mult, 2)
+                net        = round(gx - _STAKE * mult, 2)
+                bet_gx    += gx
+                stake_gx  += _STAKE * mult
+                bets      += 1
             else:
-                gx   = float(_LOSS_PTS)
-                bets += 1
+                gx         = float(_LOSS_PTS)
+                net        = float(-_STAKE * mult)
+                stake_gx  += _STAKE * mult
+                bets      += 1
 
             total_gx       += gx
+            net_gx         += net
             by_group[grp]   = round(by_group.get(grp, 0.0) + gx, 2)
             by_matchday[md] = round(by_matchday.get(md, 0.0) + gx, 2)
 
@@ -141,6 +153,10 @@ def _compute_scores() -> tuple[list[dict], list[str], list[str]]:
             "display_name": display_name,
             "nickname":     u["nickname"],
             "total_gx":     round(total_gx, 2),
+            "net_gx":       round(net_gx, 2),
+            "bet_gx":       round(bet_gx, 2),
+            "no_bet_gx":    round(no_bet_gx, 2),
+            "stake_gx":     round(stake_gx, 2),
             "bets":         bets,
             "by_group":     by_group,
             "by_matchday":  by_matchday,
@@ -154,6 +170,14 @@ def _compute_scores() -> tuple[list[dict], list[str], list[str]]:
 
 def _medal(rank: int) -> str:
     return {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, f"#{rank}")
+
+
+def _net_html(net: float) -> str:
+    if net > 0:
+        return f'<span style="color:#4caf50;">+{net:,.0f}</span>'
+    if net < 0:
+        return f'<span style="color:#f44336;">{net:,.0f}</span>'
+    return '<span style="opacity:.35;">0</span>'
 
 
 def _overall_table_html(rows: list[dict], current_user_id: int | None = None) -> str:
@@ -177,6 +201,35 @@ def _overall_table_html(rows: list[dict], current_user_id: int | None = None) ->
   <th style="padding:8px;opacity:.42;text-align:left;font-weight:500;font-size:.8rem;" colspan="2">Player</th>
   <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">GX</th>
   <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Bets</th>
+</tr></thead>
+<tbody>{''.join(trs)}</tbody>
+</table>"""
+
+
+def _detailed_table_html(rows: list[dict], current_user_id: int | None = None) -> str:
+    trs = []
+    for u in rows:
+        is_me = u["id"] == current_user_id
+        bg    = "background:rgba(255,215,0,0.06);" if is_me else ""
+        trs.append(f"""
+<tr style="border-bottom:1px solid rgba(128,128,128,0.1);{bg}">
+  <td style="padding:10px 8px;font-weight:600;white-space:nowrap;">{u['display_name']}{"&nbsp;⭐" if is_me else ""}</td>
+  <td style="padding:10px 8px;opacity:.42;font-size:.82rem;white-space:nowrap;">@{u['nickname']}</td>
+  <td style="padding:10px 12px;text-align:right;font-size:.85rem;white-space:nowrap;">{_net_html(u['net_gx'])}</td>
+  <td style="padding:10px 12px;text-align:right;font-size:.85rem;white-space:nowrap;color:#ffd700;">{u['bet_gx']:,.0f}</td>
+  <td style="padding:10px 12px;text-align:right;font-size:.85rem;white-space:nowrap;opacity:.6;">{u['no_bet_gx']:,.0f}</td>
+  <td style="padding:10px 12px;text-align:right;font-size:.85rem;opacity:.5;">{u['bets']}</td>
+  <td style="padding:10px 12px;text-align:right;font-size:.85rem;opacity:.5;white-space:nowrap;">{u['stake_gx']:,.0f}</td>
+</tr>""")
+    return f"""
+<table style="width:100%;border-collapse:collapse;">
+<thead><tr style="border-bottom:1px solid rgba(128,128,128,0.25);">
+  <th style="padding:8px 8px;opacity:.42;text-align:left;font-weight:500;font-size:.8rem;" colspan="2">Player</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">+/−</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">GX (bets)</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">GX (no bet)</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;"># Bets</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Staked</th>
 </tr></thead>
 <tbody>{''.join(trs)}</tbody>
 </table>"""
@@ -242,7 +295,7 @@ def render_leaderboard_page():
     if "lb_view" not in st.session_state:
         st.session_state["lb_view"] = "Overall"
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
         if st.button(
             "🌍  Overall", use_container_width=True,
@@ -263,6 +316,13 @@ def render_leaderboard_page():
             type="primary" if st.session_state["lb_view"] == "By Matchday" else "secondary",
         ):
             st.session_state["lb_view"] = "By Matchday"
+            st.rerun()
+    with c4:
+        if st.button(
+            "📊  Detailed", use_container_width=True,
+            type="primary" if st.session_state["lb_view"] == "Detailed" else "secondary",
+        ):
+            st.session_state["lb_view"] = "Detailed"
             st.rerun()
 
     st.markdown("---")
@@ -301,3 +361,14 @@ def render_leaderboard_page():
             top3 = sorted(user_scores, key=lambda u: -u["by_matchday"].get(sel, 0.0))[:3]
             gx_vals = [u["by_matchday"].get(sel, 0.0) for u in top3]
             st.markdown(_podium_html(top3, gx_vals), unsafe_allow_html=True)
+
+    # ── Detailed ──────────────────────────────────────────────────────────────
+    elif view == "Detailed":
+        st.markdown(
+            _detailed_table_html(user_scores, current_user_id),
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "+/− = GX earned from bets − GX staked (no-tip matches excluded) · "
+            "Staked = 100 GX × round multiplier per bet placed"
+        )

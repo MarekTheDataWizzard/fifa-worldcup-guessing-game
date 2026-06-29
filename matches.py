@@ -192,6 +192,17 @@ def _phase_label(match: dict) -> str:
     return _PHASE_LABELS.get(match["type"], match["type"])
 
 
+def _mult_badge_html(match: dict, badge_color: str) -> str:
+    mult = _MULTIPLIERS.get(match["type"], 1)
+    if mult <= 1:
+        return ""
+    return (
+        f'<span style="border:1px solid {badge_color};color:{badge_color};'
+        f'padding:2px 8px;border-radius:20px;font-size:.72rem;font-weight:700;'
+        f'margin-left:6px;letter-spacing:.03em;">×{mult}</span>'
+    )
+
+
 def _flag_img(url: str, emoji_fallback: str) -> str:
     if url:
         return (
@@ -258,6 +269,7 @@ def _card_html(match: dict, odds: dict | None = None, bettors: dict | None = Non
     """Full single-block card for finished matches."""
     badge_color = _BADGE_COLORS.get(match["type"], "#888")
     phase       = _phase_label(match)
+    mult_badge  = _mult_badge_html(match, badge_color)
     matchday    = f"Matchday {match['matchday']}" if match["matchday"] and match["type"] == "group" else ""
     home_img    = _flag_img(match["home_flag_url"], match["home_flag"])
     away_img    = _flag_img(match["away_flag_url"], match["away_flag"])
@@ -282,9 +294,11 @@ def _card_html(match: dict, odds: dict | None = None, bettors: dict | None = Non
 <div style="border:1px solid rgba(128,128,128,0.18);border-radius:14px;
             padding:16px 14px 12px;margin-bottom:10px;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-    <span style="background:{badge_color};color:#fff;padding:2px 10px;
-                 border-radius:20px;font-size:.72rem;font-weight:700;
-                 letter-spacing:.03em;">{phase}</span>
+    <div>
+      <span style="background:{badge_color};color:#fff;padding:2px 10px;
+                   border-radius:20px;font-size:.72rem;font-weight:700;
+                   letter-spacing:.03em;">{phase}</span>{mult_badge}
+    </div>
     <span style="font-size:.72rem;opacity:.45;">{matchday}</span>
   </div>
   <div style="display:flex;align-items:flex-start;justify-content:space-between;
@@ -320,6 +334,7 @@ def _card_html_top(match: dict) -> str:
     """Top portion of a split card (header + teams). Has class='card-top' for CSS scoping."""
     badge_color = _BADGE_COLORS.get(match["type"], "#888")
     phase       = _phase_label(match)
+    mult_badge  = _mult_badge_html(match, badge_color)
     matchday    = f"Matchday {match['matchday']}" if match["matchday"] and match["type"] == "group" else ""
     home_img    = _flag_img(match["home_flag_url"], match["home_flag"])
     away_img    = _flag_img(match["away_flag_url"], match["away_flag"])
@@ -332,9 +347,11 @@ def _card_html_top(match: dict) -> str:
 <div class="card-top" style="border:1px solid rgba(128,128,128,0.18);
      border-radius:14px 14px 0 0;border-bottom:none;padding:16px 14px 10px;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-    <span style="background:{badge_color};color:#fff;padding:2px 10px;
-                 border-radius:20px;font-size:.72rem;font-weight:700;
-                 letter-spacing:.03em;">{phase}</span>
+    <div>
+      <span style="background:{badge_color};color:#fff;padding:2px 10px;
+                   border-radius:20px;font-size:.72rem;font-weight:700;
+                   letter-spacing:.03em;">{phase}</span>{mult_badge}
+    </div>
     <span style="font-size:.72rem;opacity:.45;">{matchday}</span>
   </div>
   <div style="display:flex;align-items:flex-start;justify-content:space-between;
