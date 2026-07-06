@@ -279,7 +279,7 @@ def _bettors_html(bettors: dict) -> str:
     )
 
 
-def _odds_html(odds: dict | None, badge_color: str) -> str:
+def _odds_html(odds: dict | None, badge_color: str, winning_outcome: str | None = None) -> str:
     if not odds:
         return ""
     if odds.get("final") and odds["final"]["home"] is not None:
@@ -288,21 +288,26 @@ def _odds_html(odds: dict | None, badge_color: str) -> str:
         data, label = odds["indicative"], "Indicative odds"
     else:
         return ""
+
+    def _cell(key: str, value) -> str:
+        if winning_outcome == key:
+            wrap = (f'border:2px solid {badge_color};border-radius:8px;'
+                    f'padding:4px 10px;background:rgba(128,128,128,0.08);')
+        else:
+            wrap = 'padding:4px 10px;'
+        return (
+            f'<div style="text-align:center;{wrap}">'
+            f'<div style="font-size:.6rem;opacity:.4;margin-bottom:2px;">{key}</div>'
+            f'<div style="font-size:.9rem;font-weight:700;color:{badge_color};">{value}</div>'
+            f'</div>'
+        )
+
     return (
         f'<div style="border-top:1px solid rgba(128,128,128,0.12);margin:6px 0 0;padding-top:6px;">'
         f'<div style="display:flex;justify-content:space-around;align-items:center;padding:0 4px;">'
-        f'<div style="text-align:center;">'
-        f'<div style="font-size:.6rem;opacity:.4;margin-bottom:2px;">1</div>'
-        f'<div style="font-size:.9rem;font-weight:700;color:{badge_color};">{data["home"]}</div>'
-        f'</div>'
-        f'<div style="text-align:center;">'
-        f'<div style="font-size:.6rem;opacity:.4;margin-bottom:2px;">X</div>'
-        f'<div style="font-size:.9rem;font-weight:700;color:{badge_color};">{data["draw"]}</div>'
-        f'</div>'
-        f'<div style="text-align:center;">'
-        f'<div style="font-size:.6rem;opacity:.4;margin-bottom:2px;">2</div>'
-        f'<div style="font-size:.9rem;font-weight:700;color:{badge_color};">{data["away"]}</div>'
-        f'</div>'
+        f'{_cell("1", data["home"])}'
+        f'{_cell("X", data["draw"])}'
+        f'{_cell("2", data["away"])}'
         f'</div>'
         f'<div style="text-align:center;font-size:.65rem;opacity:.38;margin-top:4px;">{label}</div>'
         f'</div>'
@@ -320,24 +325,31 @@ def _card_html(match: dict, odds: dict | None = None, bettors: dict | None = Non
 
     if match["finished"]:
         if match.get("went_to_pen"):
-            suffix = ' <span style="font-size:.75rem;font-weight:600;opacity:.6;">PEN</span>'
+            ext = '<div style="font-size:.65rem;font-weight:600;opacity:.5;margin-top:2px;text-align:center;">PEN</div>'
         elif match.get("went_to_et"):
-            suffix = ' <span style="font-size:.75rem;font-weight:600;opacity:.6;">AET</span>'
+            ext = '<div style="font-size:.65rem;font-weight:600;opacity:.5;margin-top:2px;text-align:center;">AET</div>'
         else:
-            suffix = ""
+            ext = ""
         centre = (
             f'<div style="font-size:1.55rem;font-weight:800;color:{badge_color};">'
-            f'{match["home_score"]} - {match["away_score"]}{suffix}</div>'
+            f'{match["home_score"]} - {match["away_score"]}</div>'
+            f'{ext}'
         )
+        try:
+            h90, a90 = int(match.get("home_score_90", match["home_score"])), int(match.get("away_score_90", match["away_score"]))
+            winning_outcome = "1" if h90 > a90 else ("X" if h90 == a90 else "2")
+        except (TypeError, ValueError):
+            winning_outcome = None
     else:
         centre = (
             f'<div style="font-size:1rem;font-weight:700;opacity:.45;">-</div>'
             f'<div style="font-size:.8rem;font-weight:600;opacity:.55;margin-top:3px;">'
             f'{match["cet_time_str"]}</div>'
         )
+        winning_outcome = None
 
     venue       = f'🏟 {match["stadium"]}' if match["stadium"] else ""
-    odds_row    = _odds_html(odds, badge_color)
+    odds_row    = _odds_html(odds, badge_color, winning_outcome)
     bettors_row = _bettors_html(bettors) if bettors is not None else ""
 
     return f"""
