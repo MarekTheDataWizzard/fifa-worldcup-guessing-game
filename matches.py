@@ -174,6 +174,10 @@ def fetch_matches() -> list[dict]:
         local_offset = _local_utc_offset(stad.get("name_en", ""))
         cet_dt   = dt + timedelta(hours=_CET_OFFSET - local_offset)
         utc_kick = dt - timedelta(hours=local_offset)
+        # Detect penalty shootout
+        hps = (m.get("home_penalty_score") or "").strip()
+        went_to_pen = hps not in ("", "null")
+
         # Compute 90-minute score by stripping extra-time goals from scorers
         home_scorers_raw = m.get("home_scorers") or "null"
         away_scorers_raw = m.get("away_scorers") or "null"
@@ -212,6 +216,7 @@ def fetch_matches() -> list[dict]:
             "home_score_90": home_score_90,
             "away_score_90": away_score_90,
             "went_to_et":    went_to_et,
+            "went_to_pen":   went_to_pen,
             "group":         m["group"],
             "matchday":      m.get("matchday", ""),
             "type":          m["type"],
@@ -314,18 +319,16 @@ def _card_html(match: dict, odds: dict | None = None, bettors: dict | None = Non
     away_img    = _flag_img(match["away_flag_url"], match["away_flag"])
 
     if match["finished"]:
-        if match.get("went_to_et"):
-            centre = (
-                f'<div style="font-size:1.55rem;font-weight:800;color:{badge_color};">'
-                f'{match["home_score"]} - {match["away_score"]}</div>'
-                f'<div style="font-size:.6rem;opacity:.45;margin-top:2px;text-align:center;">'
-                f'AET &nbsp;·&nbsp; 90\': {match["home_score_90"]}-{match["away_score_90"]}</div>'
-            )
+        if match.get("went_to_pen"):
+            suffix = ' <span style="font-size:.75rem;font-weight:600;opacity:.6;">PEN</span>'
+        elif match.get("went_to_et"):
+            suffix = ' <span style="font-size:.75rem;font-weight:600;opacity:.6;">AET</span>'
         else:
-            centre = (
-                f'<div style="font-size:1.55rem;font-weight:800;color:{badge_color};">'
-                f'{match["home_score"]} - {match["away_score"]}</div>'
-            )
+            suffix = ""
+        centre = (
+            f'<div style="font-size:1.55rem;font-weight:800;color:{badge_color};">'
+            f'{match["home_score"]} - {match["away_score"]}{suffix}</div>'
+        )
     else:
         centre = (
             f'<div style="font-size:1rem;font-weight:700;opacity:.45;">-</div>'
