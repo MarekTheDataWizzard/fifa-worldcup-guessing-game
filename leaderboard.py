@@ -295,7 +295,8 @@ def render_leaderboard_page():
         return
 
     # ── View toggle ───────────────────────────────────────────────────────────
-    if "lb_view" not in st.session_state:
+    _valid_views = {"Overall", "Geographic", "By Matchday", "Detailed"}
+    if st.session_state.get("lb_view") not in _valid_views:
         st.session_state["lb_view"] = "Overall"
 
     c1, c2, c3, c4 = st.columns(4)
