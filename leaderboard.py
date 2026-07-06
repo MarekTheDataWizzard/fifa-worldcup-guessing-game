@@ -121,7 +121,8 @@ def _compute_scores() -> tuple[list[dict], list[str], list[str]]:
         for m in finished:
             mid     = str(m["id"])
             grp, md = _match_bucket(m)
-            outcome = _outcome(m["home_score"], m["away_score"])
+            outcome = _outcome(m.get("home_score_90", m["home_score"]),
+                              m.get("away_score_90", m["away_score"]))
             tip     = tips_idx.get((uid, mid))
             mult    = _MULTIPLIERS.get(m["type"], 1)
 

@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta
 
 import requests
@@ -135,6 +136,25 @@ def _flag(iso2: str) -> str:
     return "".join(chr(0x1F1E6 + ord(c) - ord("A")) for c in iso2.upper())
 
 
+def _count_et_goals(scorers_str: str) -> int:
+    """
+    Count goals scored in extra time (minute > 90) from the API scorers field.
+    "90+X'" = regulation stoppage time (not ET). "92'", "111'", "125(P)'" = ET.
+    """
+    if not scorers_str or scorers_str.strip().lower() == "null":
+        return 0
+    count = 0
+    for m in re.finditer(r"(\d+)(\+\d+)?(?:\([^)]*\))?\s*'", scorers_str):
+        base = int(m.group(1))
+        if m.group(2):          # "B+X" format → stoppage time at minute B
+            if base > 90:       # "105+2'" = ET stoppage; "90+4'" = regulation
+                count += 1
+        else:
+            if base > 90:       # plain "92'" / "111'" = ET
+                count += 1
+    return count
+
+
 @st.cache_data(ttl=600)
 def fetch_matches() -> list[dict]:
     matches_raw  = requests.get(f"{_LIVE_API}/games",    timeout=20).json()["games"]
@@ -154,6 +174,22 @@ def fetch_matches() -> list[dict]:
         local_offset = _local_utc_offset(stad.get("name_en", ""))
         cet_dt   = dt + timedelta(hours=_CET_OFFSET - local_offset)
         utc_kick = dt - timedelta(hours=local_offset)
+        # Compute 90-minute score by stripping extra-time goals from scorers
+        home_scorers_raw = m.get("home_scorers") or "null"
+        away_scorers_raw = m.get("away_scorers") or "null"
+        home_et = _count_et_goals(home_scorers_raw)
+        away_et = _count_et_goals(away_scorers_raw)
+        went_to_et = (home_et + away_et) > 0
+        try:
+            home_score_90 = int(m["home_score"]) - home_et
+            away_score_90 = int(m["away_score"]) - away_et
+            if home_score_90 < 0 or away_score_90 < 0:
+                raise ValueError("negative score")
+        except (TypeError, ValueError):
+            home_score_90 = m["home_score"]
+            away_score_90 = m["away_score"]
+            went_to_et    = False
+
         enriched.append({
             "id":            m["id"],
             "datetime":      dt,
@@ -173,6 +209,9 @@ def fetch_matches() -> list[dict]:
             "away_flag_url": away_t.get("flag", ""),
             "home_score":    m["home_score"],
             "away_score":    m["away_score"],
+            "home_score_90": home_score_90,
+            "away_score_90": away_score_90,
+            "went_to_et":    went_to_et,
             "group":         m["group"],
             "matchday":      m.get("matchday", ""),
             "type":          m["type"],
@@ -275,10 +314,18 @@ def _card_html(match: dict, odds: dict | None = None, bettors: dict | None = Non
     away_img    = _flag_img(match["away_flag_url"], match["away_flag"])
 
     if match["finished"]:
-        centre = (
-            f'<div style="font-size:1.55rem;font-weight:800;color:{badge_color};">'
-            f'{match["home_score"]} - {match["away_score"]}</div>'
-        )
+        if match.get("went_to_et"):
+            centre = (
+                f'<div style="font-size:1.55rem;font-weight:800;color:{badge_color};">'
+                f'{match["home_score"]} - {match["away_score"]}</div>'
+                f'<div style="font-size:.6rem;opacity:.45;margin-top:2px;text-align:center;">'
+                f'AET &nbsp;·&nbsp; 90\': {match["home_score_90"]}-{match["away_score_90"]}</div>'
+            )
+        else:
+            centre = (
+                f'<div style="font-size:1.55rem;font-weight:800;color:{badge_color};">'
+                f'{match["home_score"]} - {match["away_score"]}</div>'
+            )
     else:
         centre = (
             f'<div style="font-size:1rem;font-weight:700;opacity:.45;">-</div>'
