@@ -21,6 +21,14 @@ _PHASE_LABELS = {
 }
 _PHASE_ORDER = ["group", "r32", "r16", "qf", "sf", "third", "final"]
 
+_EUROPE_NICKNAMES = {
+    "Esteban", "MarekTheFirst", "Katka", "Katerina", "Jirka", "ondrej",
+    "Mauricio", "Rust", "sasha", "CzechMate", "gortibaldik", "ozcan", "Ozcan", "pacaklu",
+}
+
+def _location(nickname: str) -> str:
+    return "Europe" if nickname in _EUROPE_NICKNAMES else "India"
+
 
 # ─── Data helpers ──────────────────────────────────────────────────────────────
 
@@ -63,9 +71,9 @@ def _match_bucket(match: dict) -> tuple[str, str]:
 # ─── Score computation ─────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=120)
-def _compute_scores() -> tuple[list[dict], list[str], list[str]]:
+def _compute_scores() -> tuple[list[dict], list[str]]:
     """
-    Returns (user_scores, groups_ordered, matchdays_ordered).
+    Returns (user_scores, matchdays_ordered).
     Cached 2 min; every cache miss re-fetches matches, tips, and users.
     """
     matches      = fetch_matches()
@@ -95,15 +103,12 @@ def _compute_scores() -> tuple[list[dict], list[str], list[str]]:
 
     tips_idx = {(t["user_id"], t["match_id"]): t for t in all_tips}
 
-    # Collect ordered unique groups and matchdays from finished matches only
-    groups_ordered:    list[str] = []
+    # Collect ordered unique matchdays from finished matches only
     matchdays_ordered: list[str] = []
-    seen_g: set[str] = set()
     seen_m: set[str] = set()
     for m in finished:
-        grp, md = _match_bucket(m)
-        if grp not in seen_g: seen_g.add(grp); groups_ordered.append(grp)
-        if md  not in seen_m: seen_m.add(md);  matchdays_ordered.append(md)
+        _, md = _match_bucket(m)
+        if md not in seen_m: seen_m.add(md); matchdays_ordered.append(md)
 
     user_scores = []
     for u in users:
@@ -115,12 +120,11 @@ def _compute_scores() -> tuple[list[dict], list[str], list[str]]:
         no_bet_gx    = 0.0
         stake_gx     = 0.0
         bets         = 0
-        by_group:    dict[str, float] = {}
         by_matchday: dict[str, float] = {}
 
         for m in finished:
             mid     = str(m["id"])
-            grp, md = _match_bucket(m)
+            _, md   = _match_bucket(m)
             outcome = _outcome(m.get("home_score_90", m["home_score"]),
                               m.get("away_score_90", m["away_score"]))
             tip     = tips_idx.get((uid, mid))
@@ -144,10 +148,9 @@ def _compute_scores() -> tuple[list[dict], list[str], list[str]]:
                 stake_gx  += _STAKE * mult
                 bets      += 1
 
-            total_gx       += gx
-            net_gx         += net
-            by_group[grp]   = round(by_group.get(grp, 0.0) + gx, 2)
-            by_matchday[md] = round(by_matchday.get(md, 0.0) + gx, 2)
+            total_gx        += gx
+            net_gx          += net
+            by_matchday[md]  = round(by_matchday.get(md, 0.0) + gx, 2)
 
         user_scores.append({
             "id":           uid,
@@ -159,12 +162,11 @@ def _compute_scores() -> tuple[list[dict], list[str], list[str]]:
             "no_bet_gx":    round(no_bet_gx, 2),
             "stake_gx":     round(stake_gx, 2),
             "bets":         bets,
-            "by_group":     by_group,
             "by_matchday":  by_matchday,
         })
 
     user_scores.sort(key=lambda x: -x["total_gx"])
-    return user_scores, groups_ordered, matchdays_ordered
+    return user_scores, matchdays_ordered
 
 
 # ─── Rendering helpers ─────────────────────────────────────────────────────────
@@ -283,12 +285,12 @@ def render_leaderboard_page():
     current_user_id = st.session_state.get("user", {}).get("id")
 
     try:
-        user_scores, groups, matchdays = _compute_scores()
+        user_scores, matchdays = _compute_scores()
     except Exception:
         st.error("Could not load leaderboard — the data provider is temporarily unavailable. Please refresh in a moment.")
         return
 
-    if not user_scores or (not groups and not matchdays):
+    if not user_scores or not matchdays:
         st.info("No finished matches yet — check back after kick-off!")
         return
 
@@ -306,10 +308,10 @@ def render_leaderboard_page():
             st.rerun()
     with c2:
         if st.button(
-            "🔤  By Group", use_container_width=True,
-            type="primary" if st.session_state["lb_view"] == "By Group" else "secondary",
+            "🗺️  Geographic", use_container_width=True,
+            type="primary" if st.session_state["lb_view"] == "Geographic" else "secondary",
         ):
-            st.session_state["lb_view"] = "By Group"
+            st.session_state["lb_view"] = "Geographic"
             st.rerun()
     with c3:
         if st.button(
@@ -341,16 +343,21 @@ def render_leaderboard_page():
             f"Multipliers: R16 ×2 · QF ×4 · SF ×8 · 3rd ×12 · Final ×16"
         )
 
-    # ── By Group ──────────────────────────────────────────────────────────────
-    elif view == "By Group":
-        if not groups:
-            st.info("No finished group matches yet.")
-            return
-        sel = st.pills("Select group", groups, default=groups[0], key="lb_grp")
-        if sel:
-            top3 = sorted(user_scores, key=lambda u: -u["by_group"].get(sel, 0.0))[:3]
-            gx_vals = [u["by_group"].get(sel, 0.0) for u in top3]
+    # ── Geographic ────────────────────────────────────────────────────────────
+    elif view == "Geographic":
+        region = st.pills("Region", ["Europe", "India"], default="Europe", key="lb_geo")
+        if region:
+            filtered = [u for u in user_scores if _location(u["nickname"]) == region]
+            filtered_sorted = sorted(filtered, key=lambda u: -u["total_gx"])
+            top3    = filtered_sorted[:3]
+            gx_vals = [u["total_gx"] for u in top3]
             st.markdown(_podium_html(top3, gx_vals), unsafe_allow_html=True)
+            if len(filtered_sorted) > 3:
+                st.markdown("---")
+                st.markdown(
+                    _overall_table_html(filtered_sorted, current_user_id),
+                    unsafe_allow_html=True,
+                )
 
     # ── By Matchday ───────────────────────────────────────────────────────────
     elif view == "By Matchday":
