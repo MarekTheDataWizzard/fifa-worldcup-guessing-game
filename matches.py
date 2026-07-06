@@ -174,9 +174,25 @@ def fetch_matches() -> list[dict]:
         local_offset = _local_utc_offset(stad.get("name_en", ""))
         cet_dt   = dt + timedelta(hours=_CET_OFFSET - local_offset)
         utc_kick = dt - timedelta(hours=local_offset)
-        # Detect penalty shootout
-        hps = (m.get("home_penalty_score") or "").strip()
-        went_to_pen = hps not in ("", "null")
+        # Detect penalty shootout and determine who advanced
+        hps_raw = (m.get("home_penalty_score") or "").strip()
+        aps_raw = (m.get("away_penalty_score") or "").strip()
+        went_to_pen = hps_raw not in ("", "null")
+        if went_to_pen:
+            try:
+                hpen, apen = int(hps_raw), int(aps_raw)
+                if hpen > apen:
+                    home_display_score = str(int(m["home_score"]) + 1)
+                    away_display_score = m["away_score"]
+                else:
+                    home_display_score = m["home_score"]
+                    away_display_score = str(int(m["away_score"]) + 1)
+            except (TypeError, ValueError):
+                home_display_score = m["home_score"]
+                away_display_score = m["away_score"]
+        else:
+            home_display_score = m["home_score"]
+            away_display_score = m["away_score"]
 
         # Compute 90-minute score by stripping extra-time goals from scorers
         home_scorers_raw = m.get("home_scorers") or "null"
@@ -211,12 +227,14 @@ def fetch_matches() -> list[dict]:
             "away_name":     away_t.get("name_en") or m.get("away_team_label", "TBD"),
             "away_flag":     _flag(away_t.get("iso2", "")),
             "away_flag_url": away_t.get("flag", ""),
-            "home_score":    m["home_score"],
-            "away_score":    m["away_score"],
-            "home_score_90": home_score_90,
-            "away_score_90": away_score_90,
-            "went_to_et":    went_to_et,
-            "went_to_pen":   went_to_pen,
+            "home_score":         m["home_score"],
+            "away_score":         m["away_score"],
+            "home_display_score": home_display_score,
+            "away_display_score": away_display_score,
+            "home_score_90":      home_score_90,
+            "away_score_90":      away_score_90,
+            "went_to_et":         went_to_et,
+            "went_to_pen":        went_to_pen,
             "group":         m["group"],
             "matchday":      m.get("matchday", ""),
             "type":          m["type"],
@@ -330,9 +348,11 @@ def _card_html(match: dict, odds: dict | None = None, bettors: dict | None = Non
             ext = '<div style="font-size:.65rem;font-weight:600;opacity:.5;margin-top:2px;text-align:center;">AET</div>'
         else:
             ext = ""
+        h_disp = match.get("home_display_score", match["home_score"])
+        a_disp = match.get("away_display_score", match["away_score"])
         centre = (
             f'<div style="font-size:1.55rem;font-weight:800;color:{badge_color};">'
-            f'{match["home_score"]} - {match["away_score"]}</div>'
+            f'{h_disp} - {a_disp}</div>'
             f'{ext}'
         )
         try:
