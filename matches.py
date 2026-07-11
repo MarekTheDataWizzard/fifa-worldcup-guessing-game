@@ -716,9 +716,12 @@ def render_matches_page():
     # ── Card list — sequential render guarantees correct time order everywhere ──
     for match in visible:
         odds        = all_odds.get((match["home_name"], match["away_name"]))
+        # Trust time_elapsed only when we're within 30 min of kickoff — the API
+        # sometimes prematurely sets "live" for upcoming matches.
+        kickoff_close = now_utc >= match["utc_kickoff"] - timedelta(minutes=30)
         started     = (
-            match.get("time_elapsed", "notstarted") != "notstarted"
-            or now_utc >= match["utc_kickoff"]
+            now_utc >= match["utc_kickoff"]
+            or (match.get("time_elapsed", "notstarted") != "notstarted" and kickoff_close)
         )
         interactive = not match["finished"]
         user_tip    = user_tips.get(str(match["id"]))
