@@ -186,6 +186,7 @@ As the tournament progresses, the stakes get higher — every match in the knock
 - Once a match starts, your tip is **locked in** — no changes possible.
 - Odds are market averages and are locked in at the time of kick-off.
 - Players are ranked on the **Leaderboard** by total GX points.
+- **Results are based on regulation time (90 minutes) only.** Extra time and penalty shoot-outs are not counted. For example, if a match ends 3:2 after extra time but was 2:2 at 90 minutes, it is counted as a **Draw**.
 """)
 
 
