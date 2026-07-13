@@ -55,6 +55,7 @@ _MULTIPLIERS = {
     "third": 12,
     "final": 16,
 }
+_NO_BET_PTS = 70
 
 _BADGE_COLORS = {
     "group": "#c17f24",
@@ -332,7 +333,29 @@ def _odds_html(odds: dict | None, badge_color: str, winning_outcome: str | None 
     )
 
 
-def _card_html(match: dict, odds: dict | None = None, bettors: dict | None = None) -> str:
+def _gx_earned(match: dict, odds: dict | None, user_tip: dict | None, winning_outcome: str | None) -> str:
+    """Small footer pill showing GX earned by the current user for a finished match."""
+    mult = _MULTIPLIERS.get(match["type"], 1)
+    if user_tip is None:
+        gx  = _NO_BET_PTS * mult
+        return (f'<span style="font-size:.75rem;font-weight:700;opacity:.5;">'
+                f'No tip · +{gx:,.0f} GX</span>')
+    tip = user_tip["tip"]
+    if tip == winning_outcome:
+        src  = (odds.get("final") or odds.get("indicative")) if odds else None
+        key_map = {"1": "home", "X": "draw", "2": "away"}
+        rate = (src.get(key_map[tip]) if src else None) or user_tip.get("odds") or 1.0
+        gx   = round(100 * float(rate) * mult, 2)
+        return (f'<span style="font-size:.75rem;font-weight:700;color:#4caf50;">'
+                f'+{gx:,.0f} GX ✓</span>')
+    else:
+        stake = 100 * mult
+        return (f'<span style="font-size:.75rem;font-weight:700;color:#f44336;">'
+                f'0 GX &nbsp;<span style="opacity:.55;font-weight:500;">(−{stake:,.0f} staked)</span></span>')
+
+
+def _card_html(match: dict, odds: dict | None = None, bettors: dict | None = None,
+               user_tip: dict | None = None) -> str:
     """Full single-block card for finished matches."""
     badge_color = _BADGE_COLORS.get(match["type"], "#888")
     phase       = _phase_label(match)
@@ -371,6 +394,8 @@ def _card_html(match: dict, odds: dict | None = None, bettors: dict | None = Non
     venue       = f'🏟 {match["stadium"]}' if match["stadium"] else ""
     odds_row    = _odds_html(odds, badge_color, winning_outcome)
     bettors_row = _bettors_html(bettors) if bettors is not None else ""
+    show_gx     = match["finished"] and winning_outcome is not None
+    gx_html     = _gx_earned(match, odds, user_tip, winning_outcome) if show_gx else ""
 
     return f"""
 <div style="border:1px solid rgba(128,128,128,0.18);border-radius:14px;
@@ -403,10 +428,10 @@ def _card_html(match: dict, odds: dict | None = None, bettors: dict | None = Non
   {odds_row}
   {bettors_row}
   <div style="border-top:1px solid rgba(128,128,128,0.12);padding-top:7px;
-              margin-top:4px;display:flex;justify-content:space-between;
-              font-size:.7rem;opacity:.45;gap:6px;">
-    <span style="white-space:nowrap;">{match["cet_date_str"]} &nbsp;{match["cet_time_str"]} CET</span>
-    <span style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">{venue}</span>
+              margin-top:4px;display:flex;justify-content:space-between;align-items:center;
+              font-size:.7rem;gap:6px;">
+    <span style="opacity:.45;white-space:nowrap;">{match["cet_date_str"]} &nbsp;{match["cet_time_str"]} CET</span>
+    {f'<span>{gx_html}</span>' if gx_html else f'<span style="opacity:.45;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">{venue}</span>'}
   </div>
 </div>
 """
@@ -732,7 +757,8 @@ def render_matches_page():
             clickable = not started and not is_admin
             _interactive_match_card(match, odds, user_tip, user_id, clickable=clickable, bettors=bettors)
         else:
-            st.markdown(_card_html(match, odds, bettors=bettors), unsafe_allow_html=True)
+            tip_for_card = user_tip if not is_admin else None
+            st.markdown(_card_html(match, odds, bettors=bettors, user_tip=tip_for_card), unsafe_allow_html=True)
 
     # ── Show more button ──────────────────────────────────────────────────────
     remaining = len(filtered) - show_count

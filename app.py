@@ -148,6 +148,19 @@ Pick the right outcome to turn them into GX points.
 | **X** | Draw |
 | **2** | Away team wins |
 """)
+    st.markdown("""
+<div style="border:2px solid #ff9800;border-radius:12px;padding:16px 18px;
+            background:rgba(255,152,0,0.08);margin-top:4px;">
+  <div style="font-size:1.05rem;font-weight:800;margin-bottom:6px;">⏱️ Regulation time only — 90 minutes</div>
+  <div style="font-size:.93rem;line-height:1.55;">
+    All tips are evaluated on the score after <strong>regulation time (90 minutes)</strong>.
+    Extra time and penalty shoot-outs are <strong>not counted</strong>.
+  </div>
+  <div style="font-size:.85rem;opacity:.65;margin-top:8px;">
+    Example: a match ending 3:2 AET but 2:2 after 90 min → counted as a <strong>Draw ✗</strong>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
     st.divider()
 
@@ -186,7 +199,6 @@ As the tournament progresses, the stakes get higher — every match in the knock
 - Once a match starts, your tip is **locked in** — no changes possible.
 - Odds are market averages and are locked in at the time of kick-off.
 - Players are ranked on the **Leaderboard** by total GX points.
-- **Results are based on regulation time (90 minutes) only.** Extra time and penalty shoot-outs are not counted. For example, if a match ends 3:2 after extra time but was 2:2 at 90 minutes, it is counted as a **Draw**.
 """)
 
 
