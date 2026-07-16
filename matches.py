@@ -246,6 +246,43 @@ def fetch_matches() -> list[dict]:
         })
 
     enriched.sort(key=lambda x: x["datetime"])
+
+    # Resolve "Winner Match X" / "Loser Match X" labels when the API hasn't
+    # populated team IDs yet (falls back to label text instead of a real name).
+    by_id = {m["id"]: m for m in enriched}
+    for m in enriched:
+        for side in ("home", "away"):
+            name = m[f"{side}_name"]
+            hit = re.match(r"(Winner|Loser) Match (\d+)", name, re.IGNORECASE)
+            if not hit:
+                continue
+            role, ref_id = hit.group(1).lower(), hit.group(2)
+            ref = by_id.get(ref_id)
+            if not ref or not ref["finished"]:
+                continue
+            try:
+                rh = int(ref.get("home_score_90", ref["home_score"]))
+                ra = int(ref.get("away_score_90", ref["away_score"]))
+            except (TypeError, ValueError):
+                continue
+            # Determine winner/loser, accounting for penalties
+            if ref.get("went_to_pen"):
+                try:
+                    winner_is_home = int(ref["home_display_score"]) > int(ref["away_display_score"])
+                except (TypeError, ValueError):
+                    winner_is_home = rh >= ra
+            else:
+                winner_is_home = rh > ra
+            pick_home = (role == "winner") == winner_is_home
+            if pick_home:
+                m[f"{side}_name"]     = ref["home_name"]
+                m[f"{side}_flag"]     = ref["home_flag"]
+                m[f"{side}_flag_url"] = ref["home_flag_url"]
+            else:
+                m[f"{side}_name"]     = ref["away_name"]
+                m[f"{side}_flag"]     = ref["away_flag"]
+                m[f"{side}_flag_url"] = ref["away_flag_url"]
+
     return enriched
 
 
