@@ -151,13 +151,46 @@ Pick the right outcome to turn them into GX points.
     st.markdown("""
 <div style="border:2px solid #ff9800;border-radius:12px;padding:16px 18px;
             background:rgba(255,152,0,0.08);margin-top:4px;">
-  <div style="font-size:1.05rem;font-weight:800;margin-bottom:6px;">⏱️ Regulation time only — 90 min + added time</div>
-  <div style="font-size:.93rem;line-height:1.55;">
+  <div style="font-size:1.05rem;font-weight:800;margin-bottom:10px;">⏱️ Regulation time only — 90 min + added time</div>
+  <div style="font-size:.93rem;line-height:1.55;margin-bottom:12px;">
     All tips are evaluated on the score after <strong>regulation time</strong> — that is 90 minutes plus any stoppage/added time, but <strong>not</strong> extra time (the additional 30 minutes in knockouts) and <strong>not</strong> penalties.
   </div>
-  <div style="font-size:.85rem;opacity:.65;margin-top:8px;">
-    Example: a match ending 3:2 after extra time but 2:2 at the end of 90+added time → counted as a <strong>Draw</strong>
-  </div>
+  <table style="width:100%;border-collapse:collapse;font-size:.83rem;">
+    <thead>
+      <tr style="border-bottom:1px solid rgba(255,152,0,0.3);">
+        <th style="text-align:left;padding:5px 8px;opacity:.6;font-weight:600;">Scenario</th>
+        <th style="text-align:center;padding:5px 8px;opacity:.6;font-weight:600;">Score counted</th>
+        <th style="text-align:center;padding:5px 8px;opacity:.6;font-weight:600;">Result</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr style="border-bottom:1px solid rgba(255,152,0,0.15);">
+        <td style="padding:6px 8px;">1:1 at 90 min, winning goal in added time (90+3')</td>
+        <td style="padding:6px 8px;text-align:center;font-weight:700;">2:1</td>
+        <td style="padding:6px 8px;text-align:center;color:#4caf50;font-weight:700;">Win ✓</td>
+      </tr>
+      <tr style="border-bottom:1px solid rgba(255,152,0,0.15);">
+        <td style="padding:6px 8px;">0:1 at 90 min, equaliser in added time (90+5')</td>
+        <td style="padding:6px 8px;text-align:center;font-weight:700;">1:1</td>
+        <td style="padding:6px 8px;text-align:center;color:#888;font-weight:700;">Draw ✓</td>
+      </tr>
+      <tr style="border-bottom:1px solid rgba(255,152,0,0.15);">
+        <td style="padding:6px 8px;">2:2 after 90 min, team wins 3:2 in extra time (105')</td>
+        <td style="padding:6px 8px;text-align:center;font-weight:700;">2:2</td>
+        <td style="padding:6px 8px;text-align:center;color:#888;font-weight:700;">Draw ✓</td>
+      </tr>
+      <tr style="border-bottom:1px solid rgba(255,152,0,0.15);">
+        <td style="padding:6px 8px;">1:1 after extra time, team wins on penalties</td>
+        <td style="padding:6px 8px;text-align:center;font-weight:700;">1:1</td>
+        <td style="padding:6px 8px;text-align:center;color:#888;font-weight:700;">Draw ✓</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 8px;">0:0 after 90 min, team scores in extra time (102')</td>
+        <td style="padding:6px 8px;text-align:center;font-weight:700;">0:0</td>
+        <td style="padding:6px 8px;text-align:center;color:#888;font-weight:700;">Draw ✓</td>
+      </tr>
+    </tbody>
+  </table>
 </div>
 """, unsafe_allow_html=True)
 
