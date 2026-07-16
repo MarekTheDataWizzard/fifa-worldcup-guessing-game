@@ -151,13 +151,12 @@ Pick the right outcome to turn them into GX points.
     st.markdown("""
 <div style="border:2px solid #ff9800;border-radius:12px;padding:16px 18px;
             background:rgba(255,152,0,0.08);margin-top:4px;">
-  <div style="font-size:1.05rem;font-weight:800;margin-bottom:6px;">⏱️ Regulation time only — 90 minutes</div>
+  <div style="font-size:1.05rem;font-weight:800;margin-bottom:6px;">⏱️ Regulation time only — 90 min + added time</div>
   <div style="font-size:.93rem;line-height:1.55;">
-    All tips are evaluated on the score after <strong>regulation time (90 minutes)</strong>.
-    Extra time and penalty shoot-outs are <strong>not counted</strong>.
+    All tips are evaluated on the score after <strong>regulation time</strong> — that is 90 minutes plus any stoppage/added time, but <strong>not</strong> extra time (the additional 30 minutes in knockouts) and <strong>not</strong> penalties.
   </div>
   <div style="font-size:.85rem;opacity:.65;margin-top:8px;">
-    Example: a match ending 3:2 AET but 2:2 after 90 min → counted as a <strong>Draw ✗</strong>
+    Example: a match ending 3:2 after extra time but 2:2 at the end of 90+added time → counted as a <strong>Draw</strong>
   </div>
 </div>
 """, unsafe_allow_html=True)
