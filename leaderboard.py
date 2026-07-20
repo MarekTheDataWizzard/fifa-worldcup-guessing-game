@@ -30,6 +30,59 @@ def _location(nickname: str) -> str:
     return "Europe" if nickname in _EUROPE_NICKNAMES else "India"
 
 
+_STRATEGY_DEFS: list[tuple[str, str]] = [
+    ("All favorites",      "favorite"),   # always bet the lowest-odds outcome
+    ("2nd most probable",  "second"),     # always bet the middle-odds outcome
+    ("All underdogs",      "underdog"),   # always bet the highest-odds outcome
+    ("Always draw",        "draw"),       # always tip X
+    ("Always home win",    "home"),       # always tip 1
+    ("Always away win",    "away"),       # always tip 2
+    ("Only odds < 1.5",    "lt1.5"),      # tip the favorite only when odds < 1.5
+    ("Only odds < 2.0",    "lt2"),        # tip the favorite only when odds < 2.0
+    ("Only odds > 4.0",    "gt4"),        # tip the biggest underdog only when odds > 4.0
+    ("Only odds > 6.0",    "gt6"),        # tip the biggest underdog only when odds > 6.0
+]
+
+
+def _strategy_tip(strategy: str, rates: dict | None) -> tuple[str | None, float | None]:
+    """Return (tip_key, tip_odds) for a strategy, or (None, None) for no-tip."""
+    if not rates:
+        return None, None
+    opts = {k: v for k, v in rates.items() if v is not None}
+    if not opts:
+        return None, None
+    sorted_asc = sorted(opts.items(), key=lambda x: x[1])  # asc by odds value
+
+    if strategy == "favorite":
+        return sorted_asc[0]
+    if strategy == "second":
+        return sorted_asc[1] if len(sorted_asc) >= 2 else sorted_asc[0]
+    if strategy == "underdog":
+        return sorted_asc[-1]
+    if strategy == "draw":
+        v = opts.get("X")
+        return ("X", v) if v is not None else (None, None)
+    if strategy == "home":
+        v = opts.get("1")
+        return ("1", v) if v is not None else (None, None)
+    if strategy == "away":
+        v = opts.get("2")
+        return ("2", v) if v is not None else (None, None)
+    if strategy == "lt1.5":
+        q = [(k, v) for k, v in sorted_asc if v < 1.5]
+        return q[0] if q else (None, None)
+    if strategy == "lt2":
+        q = [(k, v) for k, v in sorted_asc if v < 2.0]
+        return q[0] if q else (None, None)
+    if strategy == "gt4":
+        q = [(k, v) for k, v in sorted_asc if v > 4.0]
+        return q[-1] if q else (None, None)    # highest qualifying odds
+    if strategy == "gt6":
+        q = [(k, v) for k, v in sorted_asc if v > 6.0]
+        return q[-1] if q else (None, None)
+    return None, None
+
+
 # ─── Data helpers ──────────────────────────────────────────────────────────────
 
 def _get_all_tips() -> list[dict]:
@@ -169,6 +222,139 @@ def _compute_scores() -> tuple[list[dict], list[str]]:
     return user_scores, matchdays_ordered
 
 
+@st.cache_data(ttl=120)
+def _compute_hypothetical() -> dict:
+    """
+    Returns {"no_mult": [...], "bets_only": [...], "strategies": [...]}.
+    All data sources are individually cached so no extra network calls.
+    """
+    matches  = fetch_matches()
+    all_tips = _get_all_tips()
+    users    = [u for u in get_all_users() if not u.get("is_admin")]
+    all_odds = get_all_match_odds()
+
+    finished = [
+        m for m in matches
+        if m["finished"] and _outcome(m["home_score"], m["away_score"])
+    ]
+    finished.sort(key=lambda m: (
+        _PHASE_ORDER.index(m["type"]) if m["type"] in _PHASE_ORDER else 99,
+        m.get("matchday", ""),
+    ))
+
+    match_rates: dict[str, dict] = {}
+    for m in finished:
+        od = all_odds.get((m["home_name"], m["away_name"]))
+        if od:
+            src = od.get("final") or od.get("indicative")
+            if src:
+                match_rates[str(m["id"])] = {
+                    "1": src.get("home"), "X": src.get("draw"), "2": src.get("away")
+                }
+
+    tips_idx = {(t["user_id"], t["match_id"]): t for t in all_tips}
+
+    def _display(u: dict) -> str:
+        return f"{u['first_name']} {u['last_name']}".strip() or u["nickname"]
+
+    def _result(m: dict) -> str:
+        return _outcome(m.get("home_score_90", m["home_score"]),
+                        m.get("away_score_90", m["away_score"]))
+
+    # ── No multipliers ────────────────────────────────────────────────────────
+    no_mult_rows = []
+    for u in users:
+        uid = u["id"]
+        total_gx = 0.0
+        bets = 0
+        for m in finished:
+            mid     = str(m["id"])
+            outcome = _result(m)
+            tip     = tips_idx.get((uid, mid))
+            if tip is None:
+                gx = float(_NO_BET_PTS)           # mult = 1
+            elif tip["tip"] == outcome:
+                rates = match_rates.get(mid)
+                rate  = (rates.get(tip["tip"]) if rates else None) or tip["odds"] or 1.0
+                gx    = round(_STAKE * float(rate), 2)   # mult = 1
+                bets += 1
+            else:
+                gx    = float(_LOSS_PTS)
+                bets += 1
+            total_gx += gx
+        no_mult_rows.append({
+            "id": uid, "display_name": _display(u), "nickname": u["nickname"],
+            "total_gx": round(total_gx, 2), "bets": bets,
+        })
+    no_mult_rows.sort(key=lambda x: -x["total_gx"])
+
+    # ── Bets only (no-tip = 0 GX, multipliers apply) ─────────────────────────
+    bets_only_rows = []
+    for u in users:
+        uid = u["id"]
+        total_gx = 0.0
+        bets = 0
+        for m in finished:
+            mid     = str(m["id"])
+            outcome = _result(m)
+            tip     = tips_idx.get((uid, mid))
+            mult    = _MULTIPLIERS.get(m["type"], 1)
+            if tip is None:
+                gx = 0.0
+            elif tip["tip"] == outcome:
+                rates = match_rates.get(mid)
+                rate  = (rates.get(tip["tip"]) if rates else None) or tip["odds"] or 1.0
+                gx    = round(_STAKE * float(rate) * mult, 2)
+                bets += 1
+            else:
+                gx    = 0.0
+                bets += 1
+            total_gx += gx
+        bets_only_rows.append({
+            "id": uid, "display_name": _display(u), "nickname": u["nickname"],
+            "total_gx": round(total_gx, 2), "bets": bets,
+        })
+    bets_only_rows.sort(key=lambda x: -x["total_gx"])
+
+    # ── Strategies ────────────────────────────────────────────────────────────
+    strategy_rows = []
+    for label, key in _STRATEGY_DEFS:
+        total_gx    = 0.0
+        bets_placed = 0
+        correct     = 0
+        for m in finished:
+            mid     = str(m["id"])
+            outcome = _result(m)
+            mult    = _MULTIPLIERS.get(m["type"], 1)
+            rates   = match_rates.get(mid)
+            tip_key, tip_odds = _strategy_tip(key, rates)
+            if tip_key is None:
+                gx = float(_NO_BET_PTS * mult)
+            else:
+                bets_placed += 1
+                if tip_key == outcome:
+                    gx      = round(_STAKE * float(tip_odds or 1.0) * mult, 2)
+                    correct += 1
+                else:
+                    gx = 0.0
+            total_gx += gx
+        win_pct = round(100 * correct / bets_placed, 1) if bets_placed else 0.0
+        strategy_rows.append({
+            "label":    label,
+            "total_gx": round(total_gx, 2),
+            "bets":     bets_placed,
+            "correct":  correct,
+            "win_pct":  win_pct,
+        })
+    strategy_rows.sort(key=lambda x: -x["total_gx"])
+
+    return {
+        "no_mult":   no_mult_rows,
+        "bets_only": bets_only_rows,
+        "strategies": strategy_rows,
+    }
+
+
 # ─── Rendering helpers ─────────────────────────────────────────────────────────
 
 def _medal(rank: int) -> str:
@@ -238,6 +424,33 @@ def _detailed_table_html(rows: list[dict], current_user_id: int | None = None) -
 </table>"""
 
 
+def _strategies_table_html(rows: list[dict]) -> str:
+    trs = []
+    for i, s in enumerate(rows):
+        rank = i + 1
+        trs.append(f"""
+<tr style="border-bottom:1px solid rgba(128,128,128,0.1);">
+  <td style="padding:10px 12px;white-space:nowrap;opacity:.7;">{_medal(rank)}</td>
+  <td style="padding:10px 8px;font-weight:600;">{s['label']}</td>
+  <td style="padding:10px 12px;font-weight:700;color:#ffd700;text-align:right;white-space:nowrap;">{s['total_gx']:,.0f}&nbsp;GX</td>
+  <td style="padding:10px 12px;opacity:.5;text-align:right;font-size:.85rem;">{s['bets']}</td>
+  <td style="padding:10px 12px;opacity:.5;text-align:right;font-size:.85rem;">{s['correct']}</td>
+  <td style="padding:10px 12px;opacity:.5;text-align:right;font-size:.85rem;">{s['win_pct']}%</td>
+</tr>""")
+    return f"""
+<table style="width:100%;border-collapse:collapse;">
+<thead><tr style="border-bottom:1px solid rgba(128,128,128,0.25);">
+  <th style="padding:8px 12px;opacity:.42;text-align:left;font-weight:500;font-size:.8rem;">Rank</th>
+  <th style="padding:8px;opacity:.42;text-align:left;font-weight:500;font-size:.8rem;">Strategy</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">GX</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Bets</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Correct</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Hit %</th>
+</tr></thead>
+<tbody>{''.join(trs)}</tbody>
+</table>"""
+
+
 def _podium_html(top3: list[dict], gx_values: list[float]) -> str:
     """
     top3: [rank1, rank2, rank3] (sorted highest first).
@@ -295,11 +508,11 @@ def render_leaderboard_page():
         return
 
     # ── View toggle ───────────────────────────────────────────────────────────
-    _valid_views = {"Overall", "Geographic", "By Matchday", "Detailed"}
+    _valid_views = {"Overall", "Geographic", "By Matchday", "Detailed", "Hypothetical"}
     if st.session_state.get("lb_view") not in _valid_views:
         st.session_state["lb_view"] = "Overall"
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
         if st.button(
             "🌍  Overall", use_container_width=True,
@@ -327,6 +540,13 @@ def render_leaderboard_page():
             type="primary" if st.session_state["lb_view"] == "Detailed" else "secondary",
         ):
             st.session_state["lb_view"] = "Detailed"
+            st.rerun()
+    with c5:
+        if st.button(
+            "🔮  Hypothetical", use_container_width=True,
+            type="primary" if st.session_state["lb_view"] == "Hypothetical" else "secondary",
+        ):
+            st.session_state["lb_view"] = "Hypothetical"
             st.rerun()
 
     st.markdown("---")
@@ -381,3 +601,45 @@ def render_leaderboard_page():
             "+/− = GX earned from bets − GX staked (no-tip matches excluded) · "
             "Staked = 100 GX × round multiplier per bet placed"
         )
+
+    # ── Hypothetical ──────────────────────────────────────────────────────────
+    elif view == "Hypothetical":
+        try:
+            hypo = _compute_hypothetical()
+        except Exception:
+            st.error("Could not compute hypothetical scores.")
+            return
+
+        sub = st.pills(
+            "Scenario",
+            ["No multipliers", "Bets only", "Strategies"],
+            default="No multipliers",
+            key="lb_hypo_sub",
+        )
+
+        st.markdown("---")
+
+        if sub == "No multipliers":
+            st.markdown(
+                _overall_table_html(hypo["no_mult"], current_user_id),
+                unsafe_allow_html=True,
+            )
+            st.caption("Multipliers removed — all matches scored as ×1. No-tip = 70 GX, correct tip = 100 × odds.")
+
+        elif sub == "Bets only":
+            st.markdown(
+                _overall_table_html(hypo["bets_only"], current_user_id),
+                unsafe_allow_html=True,
+            )
+            st.caption("No-tip matches score 0 GX instead of 70 GX. Multipliers apply as normal.")
+
+        elif sub == "Strategies":
+            st.markdown(
+                _strategies_table_html(hypo["strategies"]),
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                "Pseudo-players following fixed strategies across all finished matches. "
+                "Multipliers apply. No-tip matches (when a strategy doesn't bet) earn 70 × mult GX. "
+                "Hit % = correct bets / bets placed."
+            )
