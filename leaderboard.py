@@ -510,7 +510,14 @@ def _invest_table_html(rows: list[dict], current_user_id: int | None = None) -> 
   <td style="padding:10px 12px;text-align:right;font-size:.85rem;white-space:nowrap;opacity:.5;">{u['staked']:,.0f}</td>
   <td style="padding:10px 12px;text-align:right;font-size:.85rem;opacity:.5;">{u['bets']}</td>
 </tr>""")
-    return f"""
+
+    total_earned = sum(u["earned"] for u in rows)
+    total_staked = sum(u["staked"] for u in rows)
+    total_net    = round(total_earned - total_staked, 2)
+    total_bets   = sum(u["bets"] for u in rows)
+    total_pct    = round(100 * total_net / total_staked, 1) if total_staked else 0.0
+
+    header = """
 <table style="width:100%;border-collapse:collapse;">
 <thead><tr style="border-bottom:1px solid rgba(128,128,128,0.25);">
   <th style="padding:8px 12px;opacity:.42;text-align:left;font-weight:500;font-size:.8rem;">Rank</th>
@@ -521,8 +528,32 @@ def _invest_table_html(rows: list[dict], current_user_id: int | None = None) -> 
   <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Staked</th>
   <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Bets</th>
 </tr></thead>
-<tbody>{''.join(trs)}</tbody>
+<tbody>{'rows'}</tbody>
 </table>"""
+
+    totals_table = f"""
+<table style="width:100%;border-collapse:collapse;margin-top:12px;">
+<thead><tr style="border-bottom:1px solid rgba(128,128,128,0.25);">
+  <th style="padding:8px 12px;opacity:.42;text-align:left;font-weight:500;font-size:.8rem;" colspan="3">All players combined</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Return %</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">+/−</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Earned</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Staked</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Bets</th>
+</tr></thead>
+<tbody>
+<tr style="border-bottom:1px solid rgba(128,128,128,0.1);">
+  <td style="padding:10px 12px;white-space:nowrap;opacity:.7;" colspan="3"><strong>Total</strong></td>
+  <td style="padding:10px 12px;text-align:right;white-space:nowrap;">{_return_pct_html(total_pct)}</td>
+  <td style="padding:10px 12px;text-align:right;font-size:.85rem;white-space:nowrap;">{_net_html(total_net)}</td>
+  <td style="padding:10px 12px;text-align:right;font-size:.85rem;white-space:nowrap;color:#ffd700;">{total_earned:,.0f}</td>
+  <td style="padding:10px 12px;text-align:right;font-size:.85rem;white-space:nowrap;opacity:.5;">{total_staked:,.0f}</td>
+  <td style="padding:10px 12px;text-align:right;font-size:.85rem;opacity:.5;">{total_bets}</td>
+</tr>
+</tbody>
+</table>"""
+
+    return header.replace("{'rows'}", "".join(trs)) + totals_table
 
 
 def _podium_html(top3: list[dict], gx_values: list[float]) -> str:
