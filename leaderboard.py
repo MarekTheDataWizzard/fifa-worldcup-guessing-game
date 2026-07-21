@@ -348,10 +348,44 @@ def _compute_hypothetical() -> dict:
         })
     strategy_rows.sort(key=lambda x: -x["total_gx"])
 
+    # ── Worth to invest (no mult, bets only, +/- and % return) ───────────────
+    invest_rows = []
+    for u in users:
+        uid = u["id"]
+        earned = 0.0   # GX returned from correct bets (no mult)
+        staked = 0.0   # 100 GX per bet placed (no mult)
+        bets   = 0
+        for m in finished:
+            mid     = str(m["id"])
+            outcome = _result(m)
+            tip     = tips_idx.get((uid, mid))
+            if tip is None:
+                continue                          # no-tip = excluded entirely
+            bets   += 1
+            staked += float(_STAKE)              # 100 per bet, no multiplier
+            if tip["tip"] == outcome:
+                rates = match_rates.get(mid)
+                rate  = (rates.get(tip["tip"]) if rates else None) or tip["odds"] or 1.0
+                earned += round(_STAKE * float(rate), 2)
+        net        = round(earned - staked, 2)
+        return_pct = round(100 * net / staked, 1) if staked > 0 else 0.0
+        invest_rows.append({
+            "id":           uid,
+            "display_name": _display(u),
+            "nickname":     u["nickname"],
+            "earned":       round(earned, 2),
+            "staked":       round(staked, 2),
+            "net":          net,
+            "return_pct":   return_pct,
+            "bets":         bets,
+        })
+    invest_rows.sort(key=lambda x: -x["return_pct"])
+
     return {
-        "no_mult":   no_mult_rows,
-        "bets_only": bets_only_rows,
+        "no_mult":    no_mult_rows,
+        "bets_only":  bets_only_rows,
         "strategies": strategy_rows,
+        "invest":     invest_rows,
     }
 
 
@@ -446,6 +480,46 @@ def _strategies_table_html(rows: list[dict]) -> str:
   <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Bets</th>
   <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Correct</th>
   <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Hit %</th>
+</tr></thead>
+<tbody>{''.join(trs)}</tbody>
+</table>"""
+
+
+def _return_pct_html(pct: float) -> str:
+    if pct > 0:
+        return f'<span style="color:#4caf50;font-weight:700;">+{pct:.1f}%</span>'
+    if pct < 0:
+        return f'<span style="color:#f44336;font-weight:700;">{pct:.1f}%</span>'
+    return '<span style="opacity:.35;font-weight:700;">0.0%</span>'
+
+
+def _invest_table_html(rows: list[dict], current_user_id: int | None = None) -> str:
+    trs = []
+    for i, u in enumerate(rows):
+        rank  = i + 1
+        is_me = u["id"] == current_user_id
+        bg    = "background:rgba(255,215,0,0.06);" if is_me else ""
+        trs.append(f"""
+<tr style="border-bottom:1px solid rgba(128,128,128,0.1);{bg}">
+  <td style="padding:10px 12px;white-space:nowrap;opacity:.7;">{_medal(rank)}</td>
+  <td style="padding:10px 8px;font-weight:600;white-space:nowrap;">{u['display_name']}{"&nbsp;⭐" if is_me else ""}</td>
+  <td style="padding:10px 8px;opacity:.42;font-size:.82rem;white-space:nowrap;">@{u['nickname']}</td>
+  <td style="padding:10px 12px;text-align:right;white-space:nowrap;">{_return_pct_html(u['return_pct'])}</td>
+  <td style="padding:10px 12px;text-align:right;font-size:.85rem;white-space:nowrap;">{_net_html(u['net'])}</td>
+  <td style="padding:10px 12px;text-align:right;font-size:.85rem;white-space:nowrap;color:#ffd700;">{u['earned']:,.0f}</td>
+  <td style="padding:10px 12px;text-align:right;font-size:.85rem;white-space:nowrap;opacity:.5;">{u['staked']:,.0f}</td>
+  <td style="padding:10px 12px;text-align:right;font-size:.85rem;opacity:.5;">{u['bets']}</td>
+</tr>""")
+    return f"""
+<table style="width:100%;border-collapse:collapse;">
+<thead><tr style="border-bottom:1px solid rgba(128,128,128,0.25);">
+  <th style="padding:8px 12px;opacity:.42;text-align:left;font-weight:500;font-size:.8rem;">Rank</th>
+  <th style="padding:8px;opacity:.42;text-align:left;font-weight:500;font-size:.8rem;" colspan="2">Player</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Return %</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">+/−</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Earned</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Staked</th>
+  <th style="padding:8px 12px;opacity:.42;text-align:right;font-weight:500;font-size:.8rem;">Bets</th>
 </tr></thead>
 <tbody>{''.join(trs)}</tbody>
 </table>"""
@@ -612,7 +686,7 @@ def render_leaderboard_page():
 
         sub = st.pills(
             "Scenario",
-            ["No multipliers", "Bets only", "Strategies"],
+            ["No multipliers", "Bets only", "Strategies", "Worth to invest"],
             default="No multipliers",
             key="lb_hypo_sub",
         )
@@ -642,4 +716,16 @@ def render_leaderboard_page():
                 "Pseudo-players following fixed strategies across all finished matches. "
                 "Multipliers apply. No-tip matches (when a strategy doesn't bet) earn 70 × mult GX. "
                 "Hit % = correct bets / bets placed."
+            )
+
+        elif sub == "Worth to invest":
+            st.markdown(
+                _invest_table_html(hypo["invest"], current_user_id),
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                "No multipliers · No-tip matches excluded · "
+                "Staked = 100 GX per bet · Earned = GX returned from correct bets · "
+                "+/− = Earned − Staked · Return % = (+/−) / Staked · "
+                "Ranked by Return %"
             )
